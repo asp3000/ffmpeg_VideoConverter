@@ -1,0 +1,11 @@
+# Build output
+bin/
+obj/
+
+# Visual Studio / IDE
+*.user
+.vs/
+.vscode/
+
+# NuGet
+packages/
