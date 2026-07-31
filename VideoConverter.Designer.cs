@@ -42,7 +42,9 @@ namespace VideoConverter
             this.mergeCheck = new System.Windows.Forms.CheckBox();
             this.saveToCombo = new System.Windows.Forms.ComboBox();
             this.labelSaveTo = new System.Windows.Forms.Label();
-            this.convertToCombo = new System.Windows.Forms.ComboBox();
+            this.convertToPanel = new System.Windows.Forms.Panel();
+            this.convertToButton = new System.Windows.Forms.Button();
+            this.convertToGearButton = new System.Windows.Forms.Button();
             this.labelConvertTo = new System.Windows.Forms.Label();
             this.openFileDialog = new System.Windows.Forms.OpenFileDialog();
             this.topPanel.SuspendLayout();
@@ -190,7 +192,7 @@ namespace VideoConverter
             this.bottomPanel.Controls.Add(this.mergeCheck);
             this.bottomPanel.Controls.Add(this.saveToCombo);
             this.bottomPanel.Controls.Add(this.labelSaveTo);
-            this.bottomPanel.Controls.Add(this.convertToCombo);
+            this.bottomPanel.Controls.Add(this.convertToPanel);
             this.bottomPanel.Controls.Add(this.labelConvertTo);
             this.bottomPanel.Dock = System.Windows.Forms.DockStyle.Bottom;
             this.bottomPanel.Location = new System.Drawing.Point(0, 736);
@@ -250,16 +252,45 @@ namespace VideoConverter
             this.labelSaveTo.TabIndex = 2;
             this.labelSaveTo.Text = "保存到";
             // 
-            // convertToCombo
+            // convertToPanel
             // 
-            this.convertToCombo.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.convertToCombo.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.convertToCombo.FormattingEnabled = true;
-            this.convertToCombo.Location = new System.Drawing.Point(94, 20);
-            this.convertToCombo.Name = "convertToCombo";
-            this.convertToCombo.Size = new System.Drawing.Size(280, 25);
-            this.convertToCombo.TabIndex = 1;
-            this.convertToCombo.SelectedIndexChanged += new System.EventHandler(this.ConvertToCombo_SelectedIndexChanged);
+            this.convertToPanel.BackColor = System.Drawing.Color.White;
+            this.convertToPanel.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.convertToPanel.Controls.Add(this.convertToButton);
+            this.convertToPanel.Controls.Add(this.convertToGearButton);
+            this.convertToPanel.Location = new System.Drawing.Point(94, 20);
+            this.convertToPanel.Name = "convertToPanel";
+            this.convertToPanel.Size = new System.Drawing.Size(280, 28);
+            this.convertToPanel.TabIndex = 1;
+            // 
+            // convertToButton
+            // 
+            this.convertToButton.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.convertToButton.FlatAppearance.BorderSize = 0;
+            this.convertToButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.convertToButton.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.convertToButton.Location = new System.Drawing.Point(0, 0);
+            this.convertToButton.Name = "convertToButton";
+            this.convertToButton.Size = new System.Drawing.Size(250, 26);
+            this.convertToButton.TabIndex = 0;
+            this.convertToButton.Text = "MP4 1080";
+            this.convertToButton.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            this.convertToButton.UseVisualStyleBackColor = true;
+            this.convertToButton.Click += new System.EventHandler(this.ConvertToButton_Click);
+            // 
+            // convertToGearButton
+            // 
+            this.convertToGearButton.Dock = System.Windows.Forms.DockStyle.Right;
+            this.convertToGearButton.FlatAppearance.BorderSize = 0;
+            this.convertToGearButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.convertToGearButton.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F);
+            this.convertToGearButton.Location = new System.Drawing.Point(250, 0);
+            this.convertToGearButton.Name = "convertToGearButton";
+            this.convertToGearButton.Size = new System.Drawing.Size(28, 26);
+            this.convertToGearButton.TabIndex = 1;
+            this.convertToGearButton.Text = "⚙";
+            this.convertToGearButton.UseVisualStyleBackColor = true;
+            this.convertToGearButton.Click += new System.EventHandler(this.ConvertToGearButton_Click);
             // 
             // labelConvertTo
             // 
@@ -315,7 +346,9 @@ namespace VideoConverter
         private System.Windows.Forms.FlowLayoutPanel taskListPanel;
         private System.Windows.Forms.Panel bottomPanel;
         private System.Windows.Forms.Label labelConvertTo;
-        private System.Windows.Forms.ComboBox convertToCombo;
+        private System.Windows.Forms.Panel convertToPanel;
+        private System.Windows.Forms.Button convertToButton;
+        private System.Windows.Forms.Button convertToGearButton;
         private System.Windows.Forms.ComboBox saveToCombo;
         private System.Windows.Forms.Label labelSaveTo;
         private System.Windows.Forms.CheckBox mergeCheck;

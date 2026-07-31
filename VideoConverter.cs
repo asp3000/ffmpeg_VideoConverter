@@ -42,6 +42,12 @@ namespace VideoConverter
 
             // Load UniConverter preset database.
             PresetDataStore.Load();
+            if (!PresetDataStore.IsLoaded && PresetDataStore.LoadException != null)
+            {
+                MessageBox.Show(this,
+                    "预设数据加载失败，将使用内置预设。\n错误：" + PresetDataStore.LoadException.Message,
+                    "预设加载提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
 
             // Allow dropping files anywhere on the window / list.
             this.AllowDrop = true;
@@ -65,38 +71,42 @@ namespace VideoConverter
 
         #region Setup
 
+        private PresetOption _globalPreset;
+
         private void SetupPresets()
         {
-            // Bottom "Convert to" shows one representative preset per output format (e.g. MP4, AVI).
-            var formatPresets = new List<PresetOption>();
+            // Default global preset: MP4 1080 from the store if available, otherwise built-in.
+            _globalPreset = FindPresetByName("MP4", "1080")
+                ?? FindPresetByName("MP4", "与源文件相同")
+                ?? PresetOption.BuiltInAll.FirstOrDefault(p =>
+                    string.Equals(p.FormatName, "MP4", StringComparison.OrdinalIgnoreCase))
+                ?? PresetOption.MP4_1080;
+
+            UpdateConvertToDisplay();
+        }
+
+        private PresetOption FindPresetByName(string formatName, string presetNameHint)
+        {
             foreach (var cat in PresetDataStore.Categories)
             {
                 if (!PresetDataStore.FormatsByCategory.ContainsKey(cat)) continue;
                 foreach (var fmt in PresetDataStore.FormatsByCategory[cat])
                 {
-                    if (fmt.Presets.Count == 0) continue;
-                    // Pick the "Same as source" preset if available, otherwise the first one.
-                    var rep = fmt.Presets.FirstOrDefault(p => p.KeepSource)
-                              ?? fmt.Presets[0];
-                    formatPresets.Add(rep);
+                    var p = fmt.Presets.FirstOrDefault(x =>
+                        string.Equals(x.FormatName, formatName, StringComparison.OrdinalIgnoreCase) &&
+                        (x.Name.Contains(presetNameHint) ||
+                         (!string.IsNullOrEmpty(x.ResolutionLabel) && x.ResolutionLabel.Contains(presetNameHint))));
+                    if (p != null) return p.Clone();
                 }
             }
+            return null;
+        }
 
-            // Fallback to built-ins if the JSON store is empty.
-            if (formatPresets.Count == 0)
-                formatPresets.AddRange(PresetOption.BuiltInAll);
-
-            convertToCombo.DisplayMember = "FormatName";
-            convertToCombo.ValueMember = "FormatId";
-            convertToCombo.DataSource = formatPresets;
-
-            var defaultMp4 = formatPresets.FirstOrDefault(p =>
-                string.Equals(p.FormatName, "MP4", StringComparison.OrdinalIgnoreCase) &&
-                p.Name.Contains("1080"))
-                ?? formatPresets.FirstOrDefault(p =>
-                    string.Equals(p.FormatName, "MP4", StringComparison.OrdinalIgnoreCase))
-                ?? formatPresets[0];
-            convertToCombo.SelectedItem = defaultMp4;
+        private void UpdateConvertToDisplay()
+        {
+            if (_globalPreset == null) _globalPreset = PresetOption.MP4_1080;
+            convertToButton.Text = string.Format("{0} / {1}", _globalPreset.FormatName, _globalPreset.Name);
+            convertToButton.Tag = _globalPreset;
         }
 
         private void SetupSaveTo()
@@ -123,7 +133,7 @@ namespace VideoConverter
         {
             if (files == null || files.Length == 0) return;
 
-            var preset = convertToCombo.SelectedItem as PresetOption ?? PresetOption.MP4_1080;
+            var preset = _globalPreset ?? PresetOption.MP4_1080;
             bool added = false;
 
             foreach (string file in files)
@@ -545,7 +555,58 @@ namespace VideoConverter
             // Wire convert button after card is fully built.
             btnConvert.Click += (s, e) => ConvertSingleTask(task, card);
 
+            // Hover / click visual feedback on the whole card.
+            WireCardHover(cardPanel);
+
             return card;
+        }
+
+        private void WireCardHover(RoundedPanel cardPanel)
+        {
+            cardPanel.MouseEnter += (s, e) =>
+            {
+                cardPanel.IsHovered = true;
+                cardPanel.Invalidate();
+            };
+            cardPanel.MouseLeave += (s, e) =>
+            {
+                // Only turn off hover if the mouse really left the panel bounds.
+                if (!cardPanel.ClientRectangle.Contains(cardPanel.PointToClient(Control.MousePosition)))
+                {
+                    cardPanel.IsHovered = false;
+                    cardPanel.Invalidate();
+                }
+            };
+            cardPanel.Click += (s, e) =>
+            {
+                cardPanel.IsActive = !cardPanel.IsActive;
+                cardPanel.Invalidate();
+            };
+
+            foreach (Control c in cardPanel.Controls)
+            {
+                c.MouseEnter += (s, e) =>
+                {
+                    cardPanel.IsHovered = true;
+                    cardPanel.Invalidate();
+                };
+                c.MouseLeave += (s, e) =>
+                {
+                    if (!cardPanel.ClientRectangle.Contains(cardPanel.PointToClient(Control.MousePosition)))
+                    {
+                        cardPanel.IsHovered = false;
+                        cardPanel.Invalidate();
+                    }
+                };
+                c.Click += (s, e) =>
+                {
+                    // Buttons/combos have their own click logic; do not toggle active state for them.
+                    if (c is Button || c is ComboBox || c is TextBox || c is ProgressBar)
+                        return;
+                    cardPanel.IsActive = !cardPanel.IsActive;
+                    cardPanel.Invalidate();
+                };
+            }
         }
 
         private Label AddInfoLabel(Panel parent, int x, int y, string text, int width)
@@ -857,16 +918,42 @@ namespace VideoConverter
             convertingCountLabel.Text = string.Format("({0})", count);
         }
 
-        private void ConvertToCombo_SelectedIndexChanged(object sender, EventArgs e)
+        private void ConvertToButton_Click(object sender, EventArgs e)
         {
-            var formatPreset = convertToCombo.SelectedItem as PresetOption;
-            if (formatPreset == null) return;
+            using (var dlg = new PresetSelectionForm())
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedPreset != null)
+                {
+                    _globalPreset = dlg.SelectedPreset;
+                    UpdateConvertToDisplay();
+                    ApplyGlobalPresetToAll();
+                }
+            }
+        }
+
+        private void ConvertToGearButton_Click(object sender, EventArgs e)
+        {
+            using (var dlg = new PresetEditForm())
+            {
+                dlg.Preset = _globalPreset.Clone();
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    _globalPreset = dlg.Preset;
+                    UpdateConvertToDisplay();
+                    ApplyGlobalPresetToAll();
+                }
+            }
+        }
+
+        private void ApplyGlobalPresetToAll()
+        {
+            if (_globalPreset == null) return;
 
             foreach (var task in _tasks)
             {
                 // Try to keep the same preset "name" (e.g. 1080) within the new format;
                 // fall back to same-as-source, then the first preset of the format.
-                var newFormat = PresetDataStore.FindFormat(formatPreset.FormatId);
+                var newFormat = PresetDataStore.FindFormat(_globalPreset.FormatId);
                 PresetOption newPreset = null;
                 if (newFormat != null && newFormat.Presets.Count > 0)
                 {
@@ -874,15 +961,15 @@ namespace VideoConverter
                                 ?? newFormat.Presets.FirstOrDefault(p => p.KeepSource)
                                 ?? newFormat.Presets[0];
                 }
-                if (newPreset == null) newPreset = formatPreset;
+                if (newPreset == null) newPreset = _globalPreset;
 
-                task.Preset = newPreset;
+                task.Preset = newPreset.Clone();
                 var card = _cards.FirstOrDefault(c => c.Task == task);
                 if (card != null && card.PresetCombo != null)
                 {
                     card.PresetCombo.Items.Clear();
-                    card.PresetCombo.Items.Add(newPreset);
-                    card.PresetCombo.SelectedItem = newPreset;
+                    card.PresetCombo.Items.Add(task.Preset);
+                    card.PresetCombo.SelectedItem = task.Preset;
                     card.OutputNameLabel.Text = task.GetOutputFileName();
                     card.TargetFormatLabel.Text = "格式: " + task.TargetFormat;
                     card.TargetResolutionLabel.Text = "分辨率: " + task.TargetResolution;

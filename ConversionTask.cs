@@ -234,6 +234,11 @@ namespace VideoConverter
         public string SampleRate { get; set; }
         public int Channels { get; set; }
 
+        /// <summary>
+        /// 是否为内置预设。内置预设不可被直接修改；修改保存时会自动另存为“名称（自定义）”。
+        /// </summary>
+        public bool IsBuiltIn { get; set; }
+
         public string GetExtension()
         {
             return string.IsNullOrEmpty(Extension) ? ".mp4" : Extension;
@@ -259,7 +264,8 @@ namespace VideoConverter
             ResolutionValue = null,
             VideoBitrate = null,
             AudioBitrate = null,
-            FrameRate = null
+            FrameRate = null,
+            IsBuiltIn = true
         };
 
         public static readonly PresetOption MP4_4K = new PresetOption
@@ -273,7 +279,8 @@ namespace VideoConverter
             ResolutionValue = "3840x2160",
             VideoBitrate = "15000k",
             AudioBitrate = "256k",
-            FrameRate = "30"
+            FrameRate = "30",
+            IsBuiltIn = true
         };
 
         public static readonly PresetOption MP4_1080 = new PresetOption
@@ -287,7 +294,8 @@ namespace VideoConverter
             ResolutionValue = "1920x1080",
             VideoBitrate = "8000k",
             AudioBitrate = "256k",
-            FrameRate = "30"
+            FrameRate = "30",
+            IsBuiltIn = true
         };
 
         public static readonly PresetOption MP4_720 = new PresetOption
@@ -301,7 +309,8 @@ namespace VideoConverter
             ResolutionValue = "1280x720",
             VideoBitrate = "4000k",
             AudioBitrate = "192k",
-            FrameRate = "30"
+            FrameRate = "30",
+            IsBuiltIn = true
         };
 
         public static readonly PresetOption MP4_480 = new PresetOption
@@ -315,7 +324,8 @@ namespace VideoConverter
             ResolutionValue = "854x480",
             VideoBitrate = "1500k",
             AudioBitrate = "128k",
-            FrameRate = "30"
+            FrameRate = "30",
+            IsBuiltIn = true
         };
 
         public static readonly PresetOption AVI_XVID = new PresetOption
@@ -329,7 +339,8 @@ namespace VideoConverter
             ResolutionValue = "1920x1080",
             VideoBitrate = "6000k",
             AudioBitrate = "192k",
-            FrameRate = "30"
+            FrameRate = "30",
+            IsBuiltIn = true
         };
 
         public static readonly PresetOption MKV_H264 = new PresetOption
@@ -343,7 +354,8 @@ namespace VideoConverter
             ResolutionValue = "1920x1080",
             VideoBitrate = "8000k",
             AudioBitrate = "256k",
-            FrameRate = "30"
+            FrameRate = "30",
+            IsBuiltIn = true
         };
 
         public static readonly PresetOption MOV_H264 = new PresetOption
@@ -357,7 +369,8 @@ namespace VideoConverter
             ResolutionValue = "1920x1080",
             VideoBitrate = "8000k",
             AudioBitrate = "256k",
-            FrameRate = "30"
+            FrameRate = "30",
+            IsBuiltIn = true
         };
 
         /// <summary>

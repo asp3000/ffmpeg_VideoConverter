@@ -1,6 +1,8 @@
 // ============================================================================
 //  PresetEditForm.cs — edit the parameters of a PresetOption.
 //  Dropdown values come from options_spec/format_options.json.
+//  Built-in presets cannot be overwritten; saving a modified built-in preset
+//  automatically creates a custom preset with the suffix "（自定义）".
 // ============================================================================
 
 using System;
@@ -64,7 +66,7 @@ namespace VideoConverter
             // Video section header
             var lblVideo = new Label
             {
-                Text = "Video",
+                Text = "视频",
                 Location = new Point(16, y),
                 Size = new Size(80, 22),
                 Font = new Font("Microsoft YaHei UI", 11F, FontStyle.Bold),
@@ -73,23 +75,23 @@ namespace VideoConverter
             y += 32;
 
             // Row 1: Encoder + Resolution
-            var lblEncoder = new Label { Text = "Encoder", Location = new Point(16, y + 2), Size = new Size(labelW, 20), ForeColor = Color.Gray };
+            var lblEncoder = new Label { Text = "编码器", Location = new Point(16, y + 2), Size = new Size(labelW, 20), ForeColor = Color.Gray };
             cmbVideoCodec = CreateDropDown(80, y, dropW, dropH);
-            var lblRes = new Label { Text = "Resolution", Location = new Point(260, y + 2), Size = new Size(70, 20), ForeColor = Color.Gray };
+            var lblRes = new Label { Text = "分辨率", Location = new Point(260, y + 2), Size = new Size(70, 20), ForeColor = Color.Gray };
             cmbResolution = CreateDropDown(340, y, dropW, dropH);
             y += padY;
 
             // Row 2: Frame Rate + Bitrate
-            var lblFps = new Label { Text = "Frame Rate", Location = new Point(16, y + 2), Size = new Size(labelW, 20), ForeColor = Color.Gray };
+            var lblFps = new Label { Text = "帧率", Location = new Point(16, y + 2), Size = new Size(labelW, 20), ForeColor = Color.Gray };
             cmbFrameRate = CreateDropDown(80, y, dropW, dropH);
-            var lblVbr = new Label { Text = "Bitrate", Location = new Point(260, y + 2), Size = new Size(70, 20), ForeColor = Color.Gray };
+            var lblVbr = new Label { Text = "码率", Location = new Point(260, y + 2), Size = new Size(70, 20), ForeColor = Color.Gray };
             cmbVideoBitrate = CreateDropDown(340, y, dropW, dropH);
             y += padY + 10;
 
             // Audio section header
             lblAudioSection = new Label
             {
-                Text = "Audio",
+                Text = "音频",
                 Location = new Point(16, y),
                 Size = new Size(80, 22),
                 Font = new Font("Microsoft YaHei UI", 11F, FontStyle.Bold),
@@ -98,23 +100,23 @@ namespace VideoConverter
             y += 32;
 
             // Row 1: Audio Encoder + Channel
-            var lblAEncoder = new Label { Text = "Encoder", Location = new Point(16, y + 2), Size = new Size(labelW, 20), ForeColor = Color.Gray };
+            var lblAEncoder = new Label { Text = "编码器", Location = new Point(16, y + 2), Size = new Size(labelW, 20), ForeColor = Color.Gray };
             cmbAudioCodec = CreateDropDown(80, y, dropW, dropH);
-            var lblChannel = new Label { Text = "Channel", Location = new Point(260, y + 2), Size = new Size(70, 20), ForeColor = Color.Gray };
+            var lblChannel = new Label { Text = "声道", Location = new Point(260, y + 2), Size = new Size(70, 20), ForeColor = Color.Gray };
             cmbChannel = CreateDropDown(340, y, dropW, dropH);
             y += padY;
 
             // Row 2: Sample Rate + Audio Bitrate
-            var lblSr = new Label { Text = "Sample Rate", Location = new Point(16, y + 2), Size = new Size(labelW, 20), ForeColor = Color.Gray };
+            var lblSr = new Label { Text = "采样率", Location = new Point(16, y + 2), Size = new Size(labelW, 20), ForeColor = Color.Gray };
             cmbSampleRate = CreateDropDown(80, y, dropW, dropH);
-            var lblAbr = new Label { Text = "Bitrate", Location = new Point(260, y + 2), Size = new Size(70, 20), ForeColor = Color.Gray };
+            var lblAbr = new Label { Text = "码率", Location = new Point(260, y + 2), Size = new Size(70, 20), ForeColor = Color.Gray };
             cmbAudioBitrate = CreateDropDown(340, y, dropW, dropH);
             y += padY + 16;
 
             // Save as new preset checkbox
             chkSaveAsNew = new CheckBox
             {
-                Text = "Save as New Preset",
+                Text = "另存为新预设",
                 Location = new Point(16, y),
                 Size = new Size(160, 22),
                 ForeColor = Color.Gray,
@@ -128,7 +130,7 @@ namespace VideoConverter
                 Text = "保存",
                 Location = new Point(340, y),
                 Size = new Size(80, 32),
-                BackColor = Color.FromArgb(180, 150, 255),
+                BackColor = Color.FromArgb(124, 77, 255),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Microsoft YaHei UI", 9F)
@@ -196,31 +198,49 @@ namespace VideoConverter
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            if (Preset == null) Preset = new PresetOption { Name = "自定义" };
+            try
+            {
+                if (Preset == null) Preset = new PresetOption { Name = "自定义" };
 
-            _options = PresetDataStore.GetFormatOptions(Preset.FormatId);
-            if (_options == null || _options.VideoCodecs.Count == 0)
-                _options = BuildFallbackOptions(Preset);
+                _options = PresetDataStore.GetFormatOptions(Preset.FormatId);
+                if (_options == null || _options.VideoCodecs.Count == 0)
+                    _options = BuildFallbackOptions(Preset);
 
-            LoadCombo(cmbVideoCodec, _options.VideoCodecs, Preset.VideoCodec, "自动");
-            LoadCombo(cmbResolution, _options.Resolutions, Preset.ResolutionValue, "自动");
-            LoadCombo(cmbFrameRate, _options.FrameRates, Preset.FrameRate, "自动");
-            LoadCombo(cmbVideoBitrate, _options.VideoBitrates, Preset.VideoBitrate, "自动");
-            LoadCombo(cmbAudioCodec, _options.AudioCodecs, Preset.AudioCodec, "自动");
-            LoadCombo(cmbChannel, _options.Channels, Preset.Channels > 0 ? Preset.Channels.ToString() : null, "自动");
-            LoadCombo(cmbSampleRate, _options.SampleRates, Preset.SampleRate, "自动");
-            LoadCombo(cmbAudioBitrate, _options.AudioBitrates, Preset.AudioBitrate, "自动");
+                LoadCombo(cmbVideoCodec, _options.VideoCodecs, Preset.VideoCodec, "自动");
+                LoadCombo(cmbResolution, _options.Resolutions, Preset.ResolutionValue, "自动");
+                LoadCombo(cmbFrameRate, _options.FrameRates, Preset.FrameRate, "自动");
+                LoadCombo(cmbVideoBitrate, _options.VideoBitrates, Preset.VideoBitrate, "自动");
+                LoadCombo(cmbAudioCodec, _options.AudioCodecs, Preset.AudioCodec, "自动");
+                LoadCombo(cmbChannel, _options.Channels, Preset.Channels > 0 ? Preset.Channels.ToString() : null, "自动");
+                LoadCombo(cmbSampleRate, _options.SampleRates, Preset.SampleRate, "自动");
+                LoadCombo(cmbAudioBitrate, _options.AudioBitrates, Preset.AudioBitrate, "自动");
 
-            txtTitle.Text = Preset.Name ?? "";
+                txtTitle.Text = Preset.Name ?? "";
+
+                // Built-in presets cannot be overwritten; force "另存为" semantics.
+                if (Preset.IsBuiltIn)
+                {
+                    chkSaveAsNew.Checked = true;
+                    chkSaveAsNew.Enabled = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "加载预设编辑界面时出错：" + ex.Message, "错误",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void LoadCombo(ComboBox cb, List<string> items, string current, string autoText)
         {
             cb.Items.Clear();
             cb.Items.Add(autoText);
-            foreach (var item in items)
-                if (!string.IsNullOrWhiteSpace(item) && !cb.Items.Contains(item))
-                    cb.Items.Add(item);
+            if (items != null)
+            {
+                foreach (var item in items)
+                    if (!string.IsNullOrWhiteSpace(item) && !cb.Items.Contains(item))
+                        cb.Items.Add(item);
+            }
 
             if (!string.IsNullOrWhiteSpace(current) && cb.Items.Contains(current))
                 cb.SelectedItem = current;
@@ -244,31 +264,55 @@ namespace VideoConverter
 
         private void BtnSave_Click(object sender, EventArgs e)
         {
-            if (Preset == null) Preset = new PresetOption();
-
-            string title = txtTitle.Text.Trim();
-            if (!string.IsNullOrWhiteSpace(title))
-                Preset.Name = title;
-
-            if (chkSaveAsNew.Checked)
+            try
             {
-                Preset = Preset.Clone();
-                Preset.PresetId = null; // new preset
-                Preset.Name = string.IsNullOrWhiteSpace(title) ? "自定义" : title;
-            }
+                if (Preset == null) Preset = new PresetOption();
 
-            Preset.VideoCodec = GetComboValue(cmbVideoCodec, "copy");
-            Preset.ResolutionValue = GetComboValue(cmbResolution, null);
-            Preset.ResolutionLabel = string.IsNullOrEmpty(Preset.ResolutionValue)
-                ? "与源文件相同"
-                : Preset.ResolutionValue.Replace("x", " x ");
-            Preset.FrameRate = GetComboValue(cmbFrameRate, null);
-            Preset.VideoBitrate = GetComboValue(cmbVideoBitrate, null);
-            Preset.AudioCodec = GetComboValue(cmbAudioCodec, "copy");
-            if (int.TryParse(GetComboValue(cmbChannel, null), out int ch))
-                Preset.Channels = ch;
-            Preset.SampleRate = GetComboValue(cmbSampleRate, null);
-            Preset.AudioBitrate = GetComboValue(cmbAudioBitrate, null);
+                string title = txtTitle.Text.Trim();
+                bool saveAsNew = chkSaveAsNew.Checked || Preset.IsBuiltIn;
+
+                if (saveAsNew)
+                {
+                    // Clone so the original built-in preset is untouched.
+                    Preset = Preset.Clone();
+                    Preset.PresetId = null;
+                    Preset.IsBuiltIn = false;
+                    Preset.Name = string.IsNullOrWhiteSpace(title)
+                        ? AppendCustomSuffix(Preset.Name)
+                        : AppendCustomSuffix(title);
+                }
+                else if (!string.IsNullOrWhiteSpace(title))
+                {
+                    Preset.Name = title;
+                }
+
+                Preset.VideoCodec = GetComboValue(cmbVideoCodec, "copy");
+                Preset.ResolutionValue = GetComboValue(cmbResolution, null);
+                Preset.ResolutionLabel = string.IsNullOrEmpty(Preset.ResolutionValue)
+                    ? "与源文件相同"
+                    : Preset.ResolutionValue.Replace("x", " x ");
+                Preset.FrameRate = GetComboValue(cmbFrameRate, null);
+                Preset.VideoBitrate = GetComboValue(cmbVideoBitrate, null);
+                Preset.AudioCodec = GetComboValue(cmbAudioCodec, "copy");
+                if (int.TryParse(GetComboValue(cmbChannel, null), out int ch))
+                    Preset.Channels = ch;
+                Preset.SampleRate = GetComboValue(cmbSampleRate, null);
+                Preset.AudioBitrate = GetComboValue(cmbAudioBitrate, null);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "保存预设时出错：" + ex.Message, "错误",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                this.DialogResult = DialogResult.None;
+            }
+        }
+
+        private string AppendCustomSuffix(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "自定义";
+            const string suffix = "（自定义）";
+            if (name.EndsWith(suffix)) return name;
+            return name + suffix;
         }
 
         private string GetComboValue(ComboBox cb, string defaultValue)

@@ -14,8 +14,17 @@ namespace VideoConverter
     {
         public int CornerRadius { get; set; } = 12;
         public Color BorderColor { get; set; } = Color.FromArgb(197, 181, 232);
-        public int BorderWidth { get; set; } = 1;
+        public Color HoverBorderColor { get; set; } = Color.FromArgb(160, 140, 210);
+        public Color ActiveBorderColor { get; set; } = Color.FromArgb(124, 77, 255);
+
         public Color FillColor { get; set; } = Color.FromArgb(240, 236, 249);
+        public Color HoverFillColor { get; set; } = Color.FromArgb(232, 228, 245);
+
+        public int BorderWidth { get; set; } = 1;
+        public int ActiveBorderWidth { get; set; } = 2;
+
+        public bool IsHovered { get; set; }
+        public bool IsActive { get; set; }
 
         public RoundedPanel()
         {
@@ -27,14 +36,21 @@ namespace VideoConverter
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var path = GetRoundedRect(ClientRectangle, CornerRadius))
+
+            var rect = new Rectangle(0, 0, Width - 1, Height - 1);
+            using (var path = GetRoundedRect(rect, CornerRadius))
             {
-                using (var brush = new SolidBrush(FillColor))
+                // Fill.
+                Color fill = IsActive ? HoverFillColor : (IsHovered ? HoverFillColor : FillColor);
+                using (var brush = new SolidBrush(fill))
                     e.Graphics.FillPath(brush, path);
 
-                if (BorderWidth > 0)
+                // Border.
+                int bw = IsActive ? ActiveBorderWidth : BorderWidth;
+                Color bc = IsActive ? ActiveBorderColor : (IsHovered ? HoverBorderColor : BorderColor);
+                if (bw > 0)
                 {
-                    using (var pen = new Pen(BorderColor, BorderWidth))
+                    using (var pen = new Pen(bc, bw))
                     {
                         pen.Alignment = PenAlignment.Inset;
                         e.Graphics.DrawPath(pen, path);

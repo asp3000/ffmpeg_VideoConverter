@@ -1,13 +1,16 @@
 // ============================================================================
 //  PresetDataStore.cs — loads UniConverter-style preset specs from JSON.
 //  Data source: options_spec/presets.json + options_spec/format_options.json
+//  Uses DataContractJsonSerializer (System.Runtime.Serialization) so we do
+//  not depend on System.Web.Extensions at runtime.
 // ============================================================================
 
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Web.Script.Serialization;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Json;
 
 namespace VideoConverter
 {
@@ -24,9 +27,6 @@ namespace VideoConverter
             Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? AppDomain.CurrentDomain.BaseDirectory,
             "options_spec", "format_options.json");
 
-        private static Dictionary<string, object> _presetsRoot;
-        private static Dictionary<string, object> _formatOptionsRoot;
-
         /// <summary>All category names in UI order.</summary>
         public static List<string> Categories { get; private set; } = new List<string>();
 
@@ -36,65 +36,99 @@ namespace VideoConverter
         public static Dictionary<string, List<FormatEntry>> FormatsByCategory { get; private set; }
             = new Dictionary<string, List<FormatEntry>>();
 
-        public static void Load()
-        {
-            try
-            {
-                var serializer = new JavaScriptSerializer();
-                if (File.Exists(PresetsPath))
-                    _presetsRoot = serializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(PresetsPath));
-                if (File.Exists(FormatOptionsPath))
-                    _formatOptionsRoot = serializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(FormatOptionsPath));
-            }
-            catch
-            {
-                _presetsRoot = null;
-                _formatOptionsRoot = null;
-            }
+        /// <summary>Raw format options keyed by format ID.</summary>
+        public static Dictionary<string, FormatOptionJson> FormatOptions { get; private set; }
+            = new Dictionary<string, FormatOptionJson>();
 
-            BuildIndex();
+        /// <summary>Last load exception, if any. Useful for diagnostics.</summary>
+        public static Exception LoadException { get; private set; }
+
+        /// <summary>True when at least one category was loaded.</summary>
+        public static bool IsLoaded => Categories.Count > 0;
+
+        /// <summary>Recently selected presets (max 20).</summary>
+        public static List<PresetOption> RecentPresets { get; private set; } = new List<PresetOption>();
+
+        public static void AddRecent(PresetOption preset)
+        {
+            if (preset == null) return;
+            // Remove existing identical entry.
+            RecentPresets.RemoveAll(p => p.PresetId == preset.PresetId && p.Name == preset.Name && p.FormatId == preset.FormatId);
+            RecentPresets.Insert(0, preset.Clone());
+            if (RecentPresets.Count > 20)
+                RecentPresets.RemoveAt(RecentPresets.Count - 1);
         }
 
-        private static void BuildIndex()
+        public static void Load()
         {
-            FormatsByCategory = new Dictionary<string, List<FormatEntry>>();
+            LoadException = null;
             Categories = new List<string>();
+            FormatsByCategory = new Dictionary<string, List<FormatEntry>>();
+            FormatOptions = new Dictionary<string, FormatOptionJson>();
 
-            if (_presetsRoot == null || !_presetsRoot.ContainsKey("categories"))
-                return;
+            PresetsRoot presetsRoot = null;
+            Dictionary<string, FormatOptionJson> formatRoot = null;
 
-            var cats = _presetsRoot["categories"] as Dictionary<string, object>;
-            if (cats == null) return;
+            try
+            {
+                if (File.Exists(PresetsPath))
+                {
+                    using (var fs = new FileStream(PresetsPath, FileMode.Open, FileAccess.Read))
+                    {
+                        var ser = new DataContractJsonSerializer(typeof(PresetsRoot));
+                        presetsRoot = ser.ReadObject(fs) as PresetsRoot;
+                    }
+                }
 
-            foreach (var kv in cats)
+                if (File.Exists(FormatOptionsPath))
+                {
+                    using (var fs = new FileStream(FormatOptionsPath, FileMode.Open, FileAccess.Read))
+                    {
+                        var ser = new DataContractJsonSerializer(typeof(Dictionary<string, FormatOptionJson>));
+                        formatRoot = ser.ReadObject(fs) as Dictionary<string, FormatOptionJson>;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LoadException = ex;
+            }
+
+            if (formatRoot != null)
+                FormatOptions = formatRoot;
+
+            BuildIndex(presetsRoot);
+        }
+
+        private static void BuildIndex(PresetsRoot root)
+        {
+            if (root?.categories == null) return;
+
+            foreach (var kv in root.categories)
             {
                 string catName = kv.Key;
-                var formats = kv.Value as List<object>;
+                var formats = kv.Value;
                 if (formats == null) continue;
 
                 Categories.Add(catName);
                 var list = new List<FormatEntry>();
-                foreach (var fobj in formats)
+                foreach (var fmt in formats)
                 {
-                    var dict = fobj as Dictionary<string, object>;
-                    if (dict == null) continue;
-
+                    if (fmt == null) continue;
                     var entry = new FormatEntry
                     {
-                        Id = DictStr(dict, "id"),
-                        Title = DictStr(dict, "title"),
-                        Icon = DictStr(dict, "icon"),
-                        FormatId = DictStr(dict, "formatId"),
+                        Id = fmt.id ?? string.Empty,
+                        Title = fmt.title ?? string.Empty,
+                        Icon = fmt.icon ?? string.Empty,
+                        FormatId = fmt.formatId ?? string.Empty,
                     };
 
-                    var presets = dict.ContainsKey("presets") ? dict["presets"] as List<object> : null;
-                    if (presets != null)
+                    if (fmt.presets != null)
                     {
-                        foreach (var pobj in presets)
+                        foreach (var p in fmt.presets)
                         {
-                            var pdict = pobj as Dictionary<string, object>;
-                            if (pdict == null) continue;
-                            entry.Presets.Add(ToPresetOption(pdict, entry));
+                            if (p == null) continue;
+                            entry.Presets.Add(ToPresetOption(p, entry));
                         }
                     }
 
@@ -104,54 +138,29 @@ namespace VideoConverter
             }
         }
 
-        /// <summary>
-        /// Convert a JSON preset node into a PresetOption usable by the converter engine.
-        /// </summary>
-        private static PresetOption ToPresetOption(Dictionary<string, object> dict, FormatEntry format)
+        private static PresetOption ToPresetOption(PresetJson p, FormatEntry format)
         {
-            string name = DictStr(dict, "name");
-            string fmtId = DictStr(dict, "formatId");
-            bool keep = false;
-            if (dict.ContainsKey("keepSource"))
-                bool.TryParse(dict["keepSource"].ToString(), out keep);
+            string name = p.name ?? string.Empty;
+            string fmtId = p.formatId ?? format.FormatId;
+            string fourCC = p.fourCC ?? string.Empty;
+            bool keep = p.keepSource;
 
-            string vcodec = DictStr(dict, "defaultVideoCodec");
-            string acodec = DictStr(dict, "defaultAudioCodec");
-            string fourCC = DictStr(dict, "fourCC");
-
-            // Look up format-specific options to get a nice extension and fallback dropdowns.
             string ext = ".mp4";
-            if (_formatOptionsRoot != null && _formatOptionsRoot.ContainsKey(fmtId))
-            {
-                var fmt = _formatOptionsRoot[fmtId] as Dictionary<string, object>;
-                if (fmt != null)
-                {
-                    string e = DictStr(fmt, "extension");
-                    if (!string.IsNullOrEmpty(e)) ext = "." + e;
-                }
-            }
+            FormatOptionJson fmtOpt = null;
+            if (FormatOptions.ContainsKey(fmtId))
+                fmtOpt = FormatOptions[fmtId];
+            if (fmtOpt != null && !string.IsNullOrEmpty(fmtOpt.extension))
+                ext = "." + fmtOpt.extension;
             else if (!string.IsNullOrEmpty(format.Title))
-            {
                 ext = "." + format.Title.ToLowerInvariant();
-            }
 
-            // Resolution: may be null for keep-source presets.
             int w = 0, h = 0;
-            var resObj = dict.ContainsKey("resolution") ? dict["resolution"] : null;
-            if (resObj is Dictionary<string, object> res)
+            if (p.resolution != null)
             {
-                int.TryParse(res["width"].ToString(), out w);
-                int.TryParse(res["height"].ToString(), out h);
+                w = p.resolution.width;
+                h = p.resolution.height;
             }
 
-            int vbr = 0, fps = 0, abr = 0, sr = 0, ch = 0;
-            if (dict.ContainsKey("defaultBitrate")) int.TryParse(dict["defaultBitrate"].ToString(), out vbr);
-            if (dict.ContainsKey("defaultFrameRate")) int.TryParse(dict["defaultFrameRate"].ToString(), out fps);
-            if (dict.ContainsKey("defaultAudioBitrate")) int.TryParse(dict["defaultAudioBitrate"].ToString(), out abr);
-            if (dict.ContainsKey("defaultSampleRate")) int.TryParse(dict["defaultSampleRate"].ToString(), out sr);
-            if (dict.ContainsKey("defaultChannel")) int.TryParse(dict["defaultChannel"].ToString(), out ch);
-
-            // Keep-source means copy video/audio streams; no explicit parameters.
             if (keep)
             {
                 return new PresetOption
@@ -166,16 +175,16 @@ namespace VideoConverter
                     VideoBitrate = null,
                     AudioBitrate = null,
                     FrameRate = null,
-                    PresetId = DictStr(dict, "id"),
+                    PresetId = p.id,
                     FormatId = fmtId,
                     FourCC = fourCC,
                     KeepSource = true,
+                    IsBuiltIn = true,
                 };
             }
 
-            // Translate common FourCC values to ffmpeg encoder names.
-            string ffmpegVideoCodec = FourCCToVideoCodec(vcodec, fourCC);
-            string ffmpegAudioCodec = FourCCToAudioCodec(acodec);
+            string ffmpegVideoCodec = FourCCToVideoCodec(p.defaultVideoCodec, fourCC);
+            string ffmpegAudioCodec = FourCCToAudioCodec(p.defaultAudioCodec);
 
             return new PresetOption
             {
@@ -186,20 +195,22 @@ namespace VideoConverter
                 AudioCodec = ffmpegAudioCodec,
                 ResolutionLabel = w > 0 && h > 0 ? string.Format("{0} x {1}", w, h) : "与源文件相同",
                 ResolutionValue = w > 0 && h > 0 ? string.Format("{0}x{1}", w, h) : null,
-                VideoBitrate = vbr > 0 ? vbr + "k" : null,
-                AudioBitrate = abr > 0 ? abr + "k" : null,
-                FrameRate = fps > 0 ? fps.ToString() : null,
-                SampleRate = sr > 0 ? sr.ToString() : null,
-                Channels = ch,
-                PresetId = DictStr(dict, "id"),
+                VideoBitrate = p.defaultBitrate > 0 ? p.defaultBitrate + "k" : null,
+                AudioBitrate = p.defaultAudioBitrate > 0 ? p.defaultAudioBitrate + "k" : null,
+                FrameRate = p.defaultFrameRate > 0 ? p.defaultFrameRate.ToString() : null,
+                SampleRate = p.defaultSampleRate > 0 ? p.defaultSampleRate.ToString() : null,
+                Channels = p.defaultChannel > 0 ? p.defaultChannel : 0,
+                PresetId = p.id,
                 FormatId = fmtId,
                 FourCC = fourCC,
                 KeepSource = false,
+                IsBuiltIn = true,
             };
         }
 
         public static FormatEntry FindFormat(string formatId)
         {
+            if (string.IsNullOrEmpty(formatId)) return null;
             foreach (var list in FormatsByCategory.Values)
             {
                 var found = list.FirstOrDefault(f => f.FormatId == formatId);
@@ -214,65 +225,46 @@ namespace VideoConverter
         public static FormatOptions GetFormatOptions(string formatId)
         {
             var result = new FormatOptions();
-            if (_formatOptionsRoot == null || !_formatOptionsRoot.ContainsKey(formatId))
+            if (string.IsNullOrEmpty(formatId) || !FormatOptions.ContainsKey(formatId))
                 return result;
 
-            var fmt = _formatOptionsRoot[formatId] as Dictionary<string, object>;
-            if (fmt == null) return result;
-
-            var videoOptions = fmt.ContainsKey("videoOptions") ? fmt["videoOptions"] as List<object> : null;
-            if (videoOptions != null)
+            var fmt = FormatOptions[formatId];
+            if (fmt?.videoOptions != null)
             {
-                foreach (var vo in videoOptions)
+                foreach (var vo in fmt.videoOptions)
                 {
-                    var d = vo as Dictionary<string, object>;
-                    if (d == null) continue;
-                    result.VideoCodecs.Add(FourCCToVideoCodec(DictStr(d, "codec"), DictStr(fmt, "fourcc")));
+                    if (vo == null) continue;
+                    result.VideoCodecs.Add(FourCCToVideoCodec(vo.codec, fmt.fourcc));
 
-                    int w = 0, h = 0;
-                    var res = d.ContainsKey("resolution") ? d["resolution"] as Dictionary<string, object> : null;
-                    if (res != null)
-                    {
-                        int.TryParse(res["width"].ToString(), out w);
-                        int.TryParse(res["height"].ToString(), out h);
-                    }
-                    if (w > 0 && h > 0)
-                        result.Resolutions.Add(string.Format("{0}x{1}", w, h));
+                    if (vo.resolution != null && vo.resolution.width > 0 && vo.resolution.height > 0)
+                        result.Resolutions.Add(string.Format("{0}x{1}", vo.resolution.width, vo.resolution.height));
 
-                    var brs = d.ContainsKey("bitrates") ? d["bitrates"] as List<object> : null;
-                    if (brs != null)
-                        foreach (var b in brs) result.VideoBitrates.Add(b.ToString() + "k");
+                    if (vo.bitrates != null)
+                        foreach (var b in vo.bitrates) result.VideoBitrates.Add(b + "k");
 
-                    var fps = d.ContainsKey("frameRates") ? d["frameRates"] as List<object> : null;
-                    if (fps != null)
-                        foreach (var f in fps) result.FrameRates.Add(f.ToString());
+                    if (vo.frameRates != null)
+                        foreach (var f in vo.frameRates) result.FrameRates.Add(f.ToString());
                 }
             }
 
-            var audioOptions = fmt.ContainsKey("audioOptions") ? fmt["audioOptions"] as List<object> : null;
-            if (audioOptions != null)
+            if (fmt?.audioOptions != null)
             {
-                foreach (var ao in audioOptions)
+                foreach (var ao in fmt.audioOptions)
                 {
-                    var d = ao as Dictionary<string, object>;
-                    if (d == null) continue;
-                    result.AudioCodecs.Add(FourCCToAudioCodec(DictStr(d, "codec")));
+                    if (ao == null) continue;
+                    result.AudioCodecs.Add(FourCCToAudioCodec(ao.codec));
 
-                    var srs = d.ContainsKey("sampleRates") ? d["sampleRates"] as List<object> : null;
-                    if (srs != null)
-                        foreach (var s in srs) result.SampleRates.Add(s.ToString());
+                    if (ao.sampleRates != null)
+                        foreach (var s in ao.sampleRates) result.SampleRates.Add(s.ToString());
 
-                    var abrs = d.ContainsKey("bitrates") ? d["bitrates"] as List<object> : null;
-                    if (abrs != null)
-                        foreach (var b in abrs) result.AudioBitrates.Add(b.ToString() + "k");
+                    if (ao.bitrates != null)
+                        foreach (var b in ao.bitrates) result.AudioBitrates.Add(b + "k");
 
-                    var chs = d.ContainsKey("channels") ? d["channels"] as List<object> : null;
-                    if (chs != null)
-                        foreach (var c in chs) result.Channels.Add(c.ToString());
+                    if (ao.channels != null)
+                        foreach (var c in ao.channels) result.Channels.Add(c.ToString());
                 }
             }
 
-            // De-duplicate while preserving order.
             result.VideoCodecs = result.VideoCodecs.Distinct().ToList();
             result.Resolutions = result.Resolutions.Distinct().ToList();
             result.VideoBitrates = result.VideoBitrates.Distinct().ToList();
@@ -283,12 +275,6 @@ namespace VideoConverter
             result.Channels = result.Channels.Distinct().ToList();
 
             return result;
-        }
-
-        private static string DictStr(Dictionary<string, object> dict, string key)
-        {
-            if (dict == null || !dict.ContainsKey(key) || dict[key] == null) return string.Empty;
-            return dict[key].ToString();
         }
 
         private static string FourCCToVideoCodec(string fourCC, string containerFourCC)
@@ -327,12 +313,119 @@ namespace VideoConverter
                 case "FLAC": return "flac";
                 case "OPUS": return "libopus";
                 case "VORBIS": return "libvorbis";
-                case "0": return string.Empty; // no audio
+                case "0": return string.Empty;
                 case "": return "aac";
                 default: return f.ToLowerInvariant();
             }
         }
     }
+
+    #region JSON data contracts
+
+    [DataContract]
+    public class PresetsRoot
+    {
+        [DataMember]
+        public Dictionary<string, List<FormatJson>> categories { get; set; }
+    }
+
+    [DataContract]
+    public class FormatJson
+    {
+        [DataMember]
+        public string id { get; set; }
+        [DataMember]
+        public string title { get; set; }
+        [DataMember]
+        public string icon { get; set; }
+        [DataMember]
+        public string formatId { get; set; }
+        [DataMember]
+        public List<PresetJson> presets { get; set; }
+    }
+
+    [DataContract]
+    public class PresetJson
+    {
+        [DataMember]
+        public string id { get; set; }
+        [DataMember]
+        public string name { get; set; }
+        [DataMember]
+        public string formatId { get; set; }
+        [DataMember]
+        public string fourCC { get; set; }
+        [DataMember]
+        public bool keepSource { get; set; }
+        [DataMember]
+        public string defaultVideoCodec { get; set; }
+        [DataMember]
+        public ResolutionJson resolution { get; set; }
+        [DataMember]
+        public int defaultBitrate { get; set; }
+        [DataMember]
+        public int defaultFrameRate { get; set; }
+        [DataMember]
+        public string defaultAudioCodec { get; set; }
+        [DataMember]
+        public int defaultChannel { get; set; }
+        [DataMember]
+        public int defaultSampleRate { get; set; }
+        [DataMember]
+        public int defaultAudioBitrate { get; set; }
+    }
+
+    [DataContract]
+    public class ResolutionJson
+    {
+        [DataMember]
+        public int width { get; set; }
+        [DataMember]
+        public int height { get; set; }
+    }
+
+    [DataContract]
+    public class FormatOptionJson
+    {
+        [DataMember]
+        public string formatId { get; set; }
+        [DataMember]
+        public string extension { get; set; }
+        [DataMember]
+        public string fourcc { get; set; }
+        [DataMember]
+        public List<VideoOptionJson> videoOptions { get; set; }
+        [DataMember]
+        public List<AudioOptionJson> audioOptions { get; set; }
+    }
+
+    [DataContract]
+    public class VideoOptionJson
+    {
+        [DataMember]
+        public string codec { get; set; }
+        [DataMember]
+        public ResolutionJson resolution { get; set; }
+        [DataMember]
+        public List<int> bitrates { get; set; }
+        [DataMember]
+        public List<int> frameRates { get; set; }
+    }
+
+    [DataContract]
+    public class AudioOptionJson
+    {
+        [DataMember]
+        public string codec { get; set; }
+        [DataMember]
+        public List<int> sampleRates { get; set; }
+        [DataMember]
+        public List<int> bitrates { get; set; }
+        [DataMember]
+        public List<int> channels { get; set; }
+    }
+
+    #endregion
 
     public class FormatEntry
     {

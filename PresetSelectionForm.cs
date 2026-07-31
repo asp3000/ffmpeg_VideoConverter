@@ -16,6 +16,7 @@ namespace VideoConverter
         private string _selectedCategory;
         private FlowLayoutPanel _listPanel;
         private List<Button> _tabButtons = new List<Button>();
+        private TextBox _searchBox;
 
         /// <summary>Chosen preset (read after DialogResult.OK).</summary>
         public PresetOption SelectedPreset { get; private set; }
@@ -32,8 +33,16 @@ namespace VideoConverter
             this.ClientSize = new Size(720, 520);
 
             BuildTabs();
+            BuildSearch();
             BuildList();
-            SelectCategory(PresetDataStore.Categories.FirstOrDefault() ?? "视频");
+
+            // Default to "最近" if present, otherwise first category.
+            string first = PresetDataStore.Categories.FirstOrDefault();
+            if (PresetDataStore.Categories.Contains("最近"))
+                first = "最近";
+            else if (string.IsNullOrEmpty(first))
+                first = "常用";
+            SelectCategory(first);
         }
 
         private void BuildTabs()
@@ -47,8 +56,12 @@ namespace VideoConverter
             };
             this.Controls.Add(tabPanel);
 
+            var cats = new List<string>(PresetDataStore.Categories);
+            if (cats.Count == 0)
+                cats.Add("常用");
+
             int x = 12;
-            foreach (var cat in PresetDataStore.Categories)
+            foreach (var cat in cats)
             {
                 var btn = new Button
                 {
@@ -67,6 +80,47 @@ namespace VideoConverter
                 _tabButtons.Add(btn);
                 x += btn.Width + 4;
             }
+        }
+
+        private void BuildSearch()
+        {
+            var searchPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 36,
+                BackColor = Color.White,
+                Padding = new Padding(12, 4, 12, 4)
+            };
+            this.Controls.Add(searchPanel);
+
+            _searchBox = new TextBox
+            {
+                Location = new Point(searchPanel.Width - 180 - 12, 6),
+                Size = new Size(180, 24),
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Microsoft YaHei UI", 9F),
+                ForeColor = Color.Gray
+            };
+            _searchBox.Text = "搜索";
+            _searchBox.GotFocus += (s, e) =>
+            {
+                if (_searchBox.Text == "搜索")
+                {
+                    _searchBox.Text = "";
+                    _searchBox.ForeColor = Color.Black;
+                }
+            };
+            _searchBox.LostFocus += (s, e) =>
+            {
+                if (string.IsNullOrWhiteSpace(_searchBox.Text))
+                {
+                    _searchBox.Text = "搜索";
+                    _searchBox.ForeColor = Color.Gray;
+                }
+            };
+            _searchBox.TextChanged += (s, e) => RefreshList();
+            searchPanel.Controls.Add(_searchBox);
         }
 
         private void BuildList()
@@ -106,22 +160,55 @@ namespace VideoConverter
         {
             _listPanel.Controls.Clear();
 
-            if (!PresetDataStore.FormatsByCategory.ContainsKey(_selectedCategory))
-                return;
+            string keyword = _searchBox != null && _searchBox.Text != "搜索" ? _searchBox.Text.Trim() : "";
 
-            foreach (var format in PresetDataStore.FormatsByCategory[_selectedCategory])
+            IEnumerable<PresetRowSource> source;
+            if (_selectedCategory == "最近")
             {
-                foreach (var preset in format.Presets)
+                source = PresetDataStore.RecentPresets.Select(p => new PresetRowSource
                 {
-                    var row = BuildPresetRow(format, preset);
-                    _listPanel.Controls.Add(row);
-                }
+                    FormatTitle = p.FormatName,
+                    Preset = p
+                });
+            }
+            else if (_selectedCategory == "常用" || !PresetDataStore.FormatsByCategory.ContainsKey(_selectedCategory))
+            {
+                // Fallback: built-in presets.
+                source = PresetOption.BuiltInAll.Select(p => new PresetRowSource
+                {
+                    FormatTitle = p.FormatName,
+                    Preset = p
+                });
+            }
+            else
+            {
+                source = PresetDataStore.FormatsByCategory[_selectedCategory]
+                    .SelectMany(f => f.Presets, (f, p) => new PresetRowSource
+                    {
+                        FormatTitle = f.Title,
+                        Preset = p
+                    });
+            }
+
+            if (!string.IsNullOrWhiteSpace(keyword))
+            {
+                string k = keyword.ToLowerInvariant();
+                source = source.Where(r =>
+                    (r.FormatTitle ?? "").ToLowerInvariant().Contains(k) ||
+                    (r.Preset.Name ?? "").ToLowerInvariant().Contains(k) ||
+                    (r.Preset.ResolutionLabel ?? "").ToLowerInvariant().Contains(k));
+            }
+
+            foreach (var row in source)
+            {
+                var panel = BuildPresetRow(row.FormatTitle, row.Preset);
+                _listPanel.Controls.Add(panel);
             }
         }
 
-        private Panel BuildPresetRow(FormatEntry format, PresetOption preset)
+        private Panel BuildPresetRow(string formatTitle, PresetOption preset)
         {
-            int rowW = _listPanel.ClientSize.Width - 40;
+            int rowW = Math.Max(660, _listPanel.ClientSize.Width - 40);
             int rowH = 48;
 
             var panel = new Panel
@@ -129,7 +216,8 @@ namespace VideoConverter
                 Width = rowW,
                 Height = rowH,
                 Margin = new Padding(0, 0, 0, 6),
-                BackColor = Color.White
+                BackColor = Color.White,
+                Cursor = Cursors.Hand
             };
 
             // Format icon placeholder (colored rounded square with format initial).
@@ -139,7 +227,7 @@ namespace VideoConverter
                 Size = new Size(28, 28),
                 BackColor = Color.FromArgb(124, 77, 255),
                 ForeColor = Color.White,
-                Text = (format.Title ?? "?").Substring(0, 1).ToUpperInvariant(),
+                Text = string.IsNullOrEmpty(formatTitle) ? "?" : formatTitle.Substring(0, 1).ToUpperInvariant(),
                 Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleCenter
             };
@@ -151,29 +239,32 @@ namespace VideoConverter
             {
                 Location = new Point(50, 8),
                 Size = new Size(80, 18),
-                Text = format.Title,
+                Text = formatTitle,
                 Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold),
-                ForeColor = Color.FromArgb(45, 45, 45)
+                ForeColor = Color.FromArgb(45, 45, 45),
+                BackColor = Color.Transparent
             });
 
             // Preset name.
             panel.Controls.Add(new Label
             {
                 Location = new Point(140, 8),
-                Size = new Size(140, 18),
+                Size = new Size(160, 18),
                 Text = preset.Name,
                 Font = new Font("Microsoft YaHei UI", 9.5F),
-                ForeColor = Color.FromArgb(60, 60, 60)
+                ForeColor = Color.FromArgb(60, 60, 60),
+                BackColor = Color.Transparent
             });
 
             // Resolution.
             panel.Controls.Add(new Label
             {
-                Location = new Point(290, 8),
+                Location = new Point(310, 8),
                 Size = new Size(140, 18),
                 Text = preset.ResolutionLabel ?? "自动",
                 Font = new Font("Microsoft YaHei UI", 9F),
-                ForeColor = Color.FromArgb(120, 120, 120)
+                ForeColor = Color.FromArgb(120, 120, 120),
+                BackColor = Color.Transparent
             });
 
             // Delete button (visual only in this dialog; does not mutate store).
@@ -190,7 +281,6 @@ namespace VideoConverter
             btnDelete.FlatAppearance.BorderSize = 0;
             btnDelete.Click += (s, e) =>
             {
-                // Deleting from store is not persisted; just remove the visual row.
                 _listPanel.Controls.Remove(panel);
                 panel.Dispose();
             };
@@ -204,21 +294,19 @@ namespace VideoConverter
                 if (c == btnDelete) continue;
                 c.MouseEnter += (s, e) => panel.BackColor = Color.FromArgb(240, 235, 250);
                 c.MouseLeave += (s, e) => panel.BackColor = Color.White;
-                c.Click += (s, e) =>
-                {
-                    SelectedPreset = preset.Clone();
-                    this.DialogResult = DialogResult.OK;
-                    this.Close();
-                };
+                c.Click += (s, e) => SelectPreset(preset);
             }
-            panel.Click += (s, e) =>
-            {
-                SelectedPreset = preset.Clone();
-                this.DialogResult = DialogResult.OK;
-                this.Close();
-            };
+            panel.Click += (s, e) => SelectPreset(preset);
 
             return panel;
+        }
+
+        private void SelectPreset(PresetOption preset)
+        {
+            SelectedPreset = preset.Clone();
+            PresetDataStore.AddRecent(preset);
+            this.DialogResult = DialogResult.OK;
+            this.Close();
         }
 
         private void DrawRounded(Label label, int radius)
@@ -238,6 +326,12 @@ namespace VideoConverter
                     label.Region = new Region(path);
                 }
             };
+        }
+
+        private class PresetRowSource
+        {
+            public string FormatTitle { get; set; }
+            public PresetOption Preset { get; set; }
         }
     }
 }
