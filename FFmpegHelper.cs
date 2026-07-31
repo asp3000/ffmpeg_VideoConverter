@@ -308,6 +308,89 @@ namespace VideoConverter
         }
 
         /// <summary>
+        /// Extract a single video frame at a specific time (milliseconds) as PNG.
+        /// </summary>
+        public static async Task<Image> GetFrameAtTimeAsync(string filePath, long ms, int width, int height)
+        {
+            if (!File.Exists(FFmpegPath))
+                throw new FileNotFoundException("ffmpeg.exe not found.", FFmpegPath);
+
+            string tag = ProcessGuard.MakeTag(out string tempFile);
+            var psi = new ProcessStartInfo
+            {
+                FileName = FFmpegPath,
+                Arguments = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "-ss {0:0.000} -i \"{1}\" -vframes 1 -s {2}x{3} -f image2pipe -vcodec png - {4}",
+                    ms / 1000.0, filePath, width, height, tag),
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using (var proc = new Process { StartInfo = psi, EnableRaisingEvents = true })
+            {
+                var tcs = new TaskCompletionSource<object>();
+                proc.Exited += (s, e) => tcs.TrySetResult(null);
+                proc.Start();
+                ProcessGuard.Register(proc, tempFile);
+
+                var msStream = new MemoryStream();
+                await proc.StandardOutput.BaseStream.CopyToAsync(msStream);
+                await tcs.Task;
+
+                if (msStream.Length == 0) return null;
+                msStream.Position = 0;
+                using (var temp = Image.FromStream(msStream))
+                    return new Bitmap(temp);
+            }
+        }
+
+        /// <summary>
+        /// Extract keyframe timestamps (milliseconds) using ffprobe.
+        /// </summary>
+        public static async Task<List<long>> GetKeyframesAsync(string filePath)
+        {
+            var list = new List<long>();
+            if (!File.Exists(FFprobePath)) return list;
+
+            string tag = ProcessGuard.MakeTag(out string tempFile);
+            var psi = new ProcessStartInfo
+            {
+                FileName = FFprobePath,
+                Arguments = string.Format(
+                    "-v error -select_streams v:0 -skip_frame nokey -show_entries frame=pts_time -of csv=p=0 \"{0}\" {1}",
+                    filePath, tag),
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8
+            };
+
+            using (var proc = new Process { StartInfo = psi, EnableRaisingEvents = true })
+            {
+                var tcs = new TaskCompletionSource<object>();
+                proc.Exited += (s, e) => tcs.TrySetResult(null);
+                proc.Start();
+                ProcessGuard.Register(proc, tempFile);
+
+                string output = await Task.Run(() => proc.StandardOutput.ReadToEnd());
+                await tcs.Task;
+
+                foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    string t = line.Trim();
+                    if (double.TryParse(t, NumberStyles.Any, CultureInfo.InvariantCulture, out double sec))
+                        list.Add((long)(sec * 1000));
+                }
+            }
+            list.Sort();
+            return list;
+        }
+
+        /// <summary>
         /// Extract a PNG thumbnail at the 1-second mark.
         /// </summary>
         public static async Task<Image> GetThumbnailAsync(string filePath, int width, int height)
@@ -353,20 +436,36 @@ namespace VideoConverter
         /// Honors two optional modes set on the task before a run:
         ///  - UseStreamCopy : remux with "-c copy" (high-speed mode, same container)
         ///  - HardwareEncoder : swap the software video encoder for a HW one
+        ///  - Segments/Crop : multi-segment trim and video cropping
         /// </summary>
         public static string BuildArguments(ConversionTask task)
+        {
+            var segment = (task.Segments != null && task.Segments.Count > 0)
+                ? task.Segments[0]
+                : new VideoSegment { StartMs = 0, EndMs = (long)(task.SourceDurationSeconds * 1000) };
+            return BuildSegmentArguments(task, segment, task.OutputPath);
+        }
+
+        /// <summary>
+        /// Build ffmpeg arguments for one segment. outputPath may differ from task.OutputPath.
+        /// </summary>
+        public static string BuildSegmentArguments(ConversionTask task, VideoSegment segment, string outputPath)
         {
             var sb = new StringBuilder();
             sb.Append(" -y"); // overwrite output
 
-            // Trim: apply -ss before input for fast seek, -to after input.
-            if (task.TrimStartSeconds > 0)
-                sb.AppendFormat(" -ss {0:0.000}", task.TrimStartSeconds);
+            double startSec = segment.StartMs / 1000.0;
+            double endSec = segment.EndMs / 1000.0;
+            double durationSec = Math.Max(0, endSec - startSec);
+
+            // Trim: apply -ss before input for fast seek, -t after input for accurate duration.
+            if (startSec > 0)
+                sb.AppendFormat(CultureInfo.InvariantCulture, " -ss {0:0.000}", startSec);
 
             sb.AppendFormat(" -i \"{0}\"", task.InputPath);
 
-            if (task.TrimEndSeconds > task.TrimStartSeconds && task.TrimEndSeconds > 0)
-                sb.AppendFormat(" -to {0:0.000}", task.TrimEndSeconds);
+            if (durationSec > 0 && durationSec < task.SourceDurationSeconds - 0.05)
+                sb.AppendFormat(CultureInfo.InvariantCulture, " -t {0:0.000}", durationSec);
 
             // Stream mapping for selected tracks.
             sb.Append(" -map 0:v:0");
@@ -376,16 +475,37 @@ namespace VideoConverter
                 sb.Append(" -an");
 
             // High-speed mode: stream copy (only valid for matching containers).
-            if (task.UseStreamCopy)
+            // Cannot stream-copy when crop/rotation is requested.
+            bool hasVideoFilter = task.Crop != null || task.Rotation != 0;
+            if (task.UseStreamCopy && !hasVideoFilter)
             {
                 sb.Append(" -c copy");
-                sb.AppendFormat(" \"{0}\"", task.OutputPath);
+                sb.AppendFormat(" \"{0}\"", outputPath);
                 return sb.ToString();
             }
 
             var p = task.Preset;
             if (p != null)
             {
+                // Video filter chain (crop / rotate / scale).
+                var vfParts = new List<string>();
+                if (task.Crop != null)
+                {
+                    var c = task.Crop;
+                    vfParts.Add(string.Format(CultureInfo.InvariantCulture, "crop={0}:{1}:{2}:{3}",
+                        c.Width, c.Height, c.X, c.Y));
+                }
+                switch (task.Rotation)
+                {
+                    case 1: vfParts.Add("transpose=1"); break; // 90° clockwise
+                    case 2: vfParts.Add("transpose=2"); break; // 90° counter-clockwise
+                    case 3: vfParts.Add("transpose=1,transpose=1"); break; // 180°
+                    case 4: vfParts.Add("hflip"); break;
+                    case 5: vfParts.Add("vflip"); break;
+                }
+                if (!string.IsNullOrEmpty(p.ResolutionValue))
+                    vfParts.Add(string.Format("scale={0}", p.ResolutionValue.Replace("x", ":")));
+
                 // Video
                 string vcodec = !string.IsNullOrEmpty(task.HardwareEncoder) ? task.HardwareEncoder : p.VideoCodec;
                 if (string.Equals(p.VideoCodec, "copy", StringComparison.OrdinalIgnoreCase) ||
@@ -396,7 +516,9 @@ namespace VideoConverter
                 else
                 {
                     sb.AppendFormat(" -c:v {0}", vcodec);
-                    if (!string.IsNullOrEmpty(p.ResolutionValue))
+                    if (vfParts.Count > 0)
+                        sb.AppendFormat(" -vf \"{0}\"", string.Join(",", vfParts));
+                    if (!string.IsNullOrEmpty(p.ResolutionValue) && vfParts.Count == 0)
                         sb.AppendFormat(" -s {0}", p.ResolutionValue);
                     if (!string.IsNullOrEmpty(p.VideoBitrate))
                         sb.AppendFormat(" -b:v {0}", p.VideoBitrate);
@@ -431,12 +553,65 @@ namespace VideoConverter
                 }
             }
 
-            sb.AppendFormat(" \"{0}\"", task.OutputPath);
+            sb.AppendFormat(" \"{0}\"", outputPath);
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Build ffmpeg arguments that merge multiple segments into one output file using concat demuxer.
+        /// This creates a temporary concat list file; caller is responsible for deleting it after the run.
+        /// </summary>
+        public static string BuildMergedArguments(ConversionTask task, string concatListPath, string outputPath)
+        {
+            var sb = new StringBuilder();
+            sb.Append(" -y -f concat -safe 0 -i \"");
+            sb.Append(concatListPath);
+            sb.Append("\"");
+
+            var p = task.Preset;
+            if (p != null)
+            {
+                string vcodec = !string.IsNullOrEmpty(task.HardwareEncoder) ? task.HardwareEncoder : p.VideoCodec;
+                if (string.Equals(p.VideoCodec, "copy", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(vcodec, "copy", StringComparison.OrdinalIgnoreCase))
+                {
+                    sb.Append(" -c:v copy");
+                }
+                else
+                {
+                    sb.AppendFormat(" -c:v {0}", vcodec);
+                    if (!string.IsNullOrEmpty(p.ResolutionValue))
+                        sb.AppendFormat(" -s {0}", p.ResolutionValue);
+                    if (!string.IsNullOrEmpty(p.VideoBitrate))
+                        sb.AppendFormat(" -b:v {0}", p.VideoBitrate);
+                    if (!string.IsNullOrEmpty(p.FrameRate))
+                        sb.AppendFormat(" -r {0}", p.FrameRate);
+                }
+
+                if (task.SelectedAudioTrack == null)
+                    sb.Append(" -an");
+                else if (string.Equals(p.AudioCodec, "copy", StringComparison.OrdinalIgnoreCase))
+                    sb.Append(" -c:a copy");
+                else
+                {
+                    sb.AppendFormat(" -c:a {0}", p.AudioCodec);
+                    if (!string.IsNullOrEmpty(p.AudioBitrate))
+                        sb.AppendFormat(" -b:a {0}", p.AudioBitrate);
+                }
+
+                if (task.SelectedSubtitleTrack != null)
+                    sb.AppendFormat(" -map 0:s:{0} -c:s copy", task.SelectedSubtitleTrack.Index);
+                else
+                    sb.Append(" -sn");
+            }
+
+            sb.AppendFormat(" \"{0}\"", outputPath);
             return sb.ToString();
         }
 
         /// <summary>
         /// Run ffmpeg with progress callbacks.
+        /// Handles single segment, multi-segment merge, and multi-segment split output.
         /// </summary>
         public static async Task RunAsync(ConversionTask task,
             IProgress<double> progress,
@@ -445,7 +620,142 @@ namespace VideoConverter
             if (!File.Exists(FFmpegPath))
                 throw new FileNotFoundException("ffmpeg.exe not found.", FFmpegPath);
 
-            string args = BuildArguments(task);
+            bool hasSegments = task.Segments != null && task.Segments.Count > 0;
+            bool hasCrop = task.Crop != null || task.Rotation != 0;
+
+            // Simple path: no segments or single segment without crop -> existing single-run behavior.
+            if (!hasSegments || (task.Segments.Count == 1 && !hasCrop))
+            {
+                double duration = task.SourceDurationSeconds;
+                if (hasSegments && task.Segments.Count == 1)
+                    duration = (task.Segments[0].EndMs - task.Segments[0].StartMs) / 1000.0;
+                await RunSingleAsync(task, BuildArguments(task), duration, progress, cancellationToken);
+                return;
+            }
+
+            if (task.MergeSegments)
+            {
+                // One ffmpeg run with select filters covering all retained segments.
+                string args = BuildMergeFilterArguments(task, task.OutputPath);
+                double totalDuration = task.GetEditedDurationSeconds();
+                await RunSingleAsync(task, args, totalDuration, progress, cancellationToken);
+            }
+            else
+            {
+                // Run ffmpeg once per segment; output files get numeric suffixes.
+                var outputs = task.GetOutputPaths();
+                int total = outputs.Count;
+                for (int i = 0; i < total; i++)
+                {
+                    var segment = task.Segments[i];
+                    string args = BuildSegmentArguments(task, segment, outputs[i]);
+                    double segDuration = (segment.EndMs - segment.StartMs) / 1000.0;
+                    var segProgress = new Progress<double>(v => progress?.Report((i + v) / total));
+                    await RunSingleAsync(task, args, segDuration, segProgress, cancellationToken);
+                    if (cancellationToken.IsCancellationRequested) break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Build a single-run ffmpeg argument that selects and concatenates all retained segments in memory.
+        /// </summary>
+        private static string BuildMergeFilterArguments(ConversionTask task, string outputPath)
+        {
+            var sb = new StringBuilder();
+            sb.Append(" -y");
+            sb.AppendFormat(" -i \"{0}\"", task.InputPath);
+
+            // Stream mapping.
+            sb.Append(" -map 0:v:0");
+            if (task.SelectedAudioTrack != null)
+                sb.AppendFormat(" -map 0:a:{0}", task.SelectedAudioTrack.Index);
+            else
+                sb.Append(" -an");
+
+            // Video filter: crop/rotate/scale + select segments + reset timestamps.
+            var vfParts = new List<string>();
+            if (task.Crop != null)
+            {
+                var c = task.Crop;
+                vfParts.Add(string.Format(CultureInfo.InvariantCulture, "crop={0}:{1}:{2}:{3}",
+                    c.Width, c.Height, c.X, c.Y));
+            }
+            switch (task.Rotation)
+            {
+                case 1: vfParts.Add("transpose=1"); break;
+                case 2: vfParts.Add("transpose=2"); break;
+                case 3: vfParts.Add("transpose=1,transpose=1"); break;
+                case 4: vfParts.Add("hflip"); break;
+                case 5: vfParts.Add("vflip"); break;
+            }
+
+            var selectExpr = new StringBuilder();
+            for (int i = 0; i < task.Segments.Count; i++)
+            {
+                var seg = task.Segments[i];
+                if (i > 0) selectExpr.Append("+");
+                selectExpr.AppendFormat(CultureInfo.InvariantCulture, "between(t,{0:0.000},{1:0.000})",
+                    seg.StartMs / 1000.0, seg.EndMs / 1000.0);
+            }
+            vfParts.Add(string.Format("select='{0}'", selectExpr));
+            vfParts.Add("setpts=N/FRAME_RATE/TB");
+
+            var p = task.Preset;
+            if (p != null)
+            {
+                string vcodec = !string.IsNullOrEmpty(task.HardwareEncoder) ? task.HardwareEncoder : p.VideoCodec;
+                // Merging segments requires re-encoding; ignore "copy" requests.
+                bool forceVideoEncode = task.Segments != null && task.Segments.Count > 0;
+                if (!forceVideoEncode &&
+                    (string.Equals(p.VideoCodec, "copy", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(vcodec, "copy", StringComparison.OrdinalIgnoreCase)))
+                {
+                    sb.Append(" -c:v copy");
+                }
+                else
+                {
+                    if (string.Equals(vcodec, "copy", StringComparison.OrdinalIgnoreCase))
+                        vcodec = "libx264"; // safe fallback for segmented merge
+                    sb.AppendFormat(" -c:v {0}", vcodec);
+                    if (!string.IsNullOrEmpty(p.ResolutionValue))
+                        vfParts.Add(string.Format("scale={0}", p.ResolutionValue.Replace("x", ":")));
+                    sb.AppendFormat(" -vf \"{0}\"", string.Join(",", vfParts));
+                    if (!string.IsNullOrEmpty(p.VideoBitrate))
+                        sb.AppendFormat(" -b:v {0}", p.VideoBitrate);
+                    if (!string.IsNullOrEmpty(p.FrameRate))
+                        sb.AppendFormat(" -r {0}", p.FrameRate);
+                }
+
+                bool forceAudioEncode = task.Segments != null && task.Segments.Count > 0;
+                if (task.SelectedAudioTrack == null)
+                    sb.Append(" -an");
+                else if (!forceAudioEncode && string.Equals(p.AudioCodec, "copy", StringComparison.OrdinalIgnoreCase))
+                    sb.Append(" -c:a copy");
+                else
+                {
+                    string acodec = forceAudioEncode && string.Equals(p.AudioCodec, "copy", StringComparison.OrdinalIgnoreCase)
+                        ? "aac" : p.AudioCodec;
+                    sb.AppendFormat(" -c:a {0}", acodec);
+                    // Audio select + reset timestamps must match video segments.
+                    sb.AppendFormat(" -af \"aselect='{0}',asetpts=N/SR/TB\"", selectExpr);
+                    if (!string.IsNullOrEmpty(p.AudioBitrate))
+                        sb.AppendFormat(" -b:a {0}", p.AudioBitrate);
+                }
+
+                if (task.SelectedSubtitleTrack != null)
+                    sb.AppendFormat(" -map 0:s:{0} -c:s copy", task.SelectedSubtitleTrack.Index);
+                else
+                    sb.Append(" -sn");
+            }
+
+            sb.AppendFormat(" \"{0}\"", outputPath);
+            return sb.ToString();
+        }
+
+        private static async Task RunSingleAsync(ConversionTask task, string args,
+            double duration, IProgress<double> progress, CancellationToken cancellationToken)
+        {
             string tag = ProcessGuard.MakeTag(out string tempFile);
             var psi = new ProcessStartInfo
             {
@@ -458,8 +768,6 @@ namespace VideoConverter
                 StandardErrorEncoding = Encoding.UTF8
             };
 
-            double duration = await GetDurationAsync(task.InputPath);
-            var durationRegex = new Regex(@"Duration:\s+(\d{2}):(\d{2}):(\d{2}\.\d+)", RegexOptions.Compiled);
             var timeRegex = new Regex(@"time=(\d{2}):(\d{2}):(\d{2}\.\d+)", RegexOptions.Compiled);
 
             using (var proc = new Process { StartInfo = psi, EnableRaisingEvents = true })
@@ -469,7 +777,6 @@ namespace VideoConverter
                 proc.Start();
                 ProcessGuard.Register(proc, tempFile);
 
-                // Read stderr line by line to parse progress.
                 var stderrReader = Task.Run(async () =>
                 {
                     string line;

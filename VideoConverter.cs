@@ -755,12 +755,8 @@ namespace VideoConverter
         {
             try
             {
-                double seconds = task.SourceDurationSeconds;
+                double seconds = task.GetEditedDurationSeconds();
                 if (seconds <= 0) return "-";
-                if (task.TrimEndSeconds > task.TrimStartSeconds && task.TrimEndSeconds <= seconds)
-                    seconds = task.TrimEndSeconds - task.TrimStartSeconds;
-                else if (task.TrimStartSeconds > 0)
-                    seconds = Math.Max(0, seconds - task.TrimStartSeconds);
 
                 long videoBps = ParseBitRate(task.Preset.VideoBitrate);
                 long audioBps = ParseBitRate(task.Preset.AudioBitrate);
@@ -818,15 +814,26 @@ namespace VideoConverter
             }
         }
 
-        private void OpenVideoEdit(ConversionTask task)
+        private async void OpenVideoEdit(ConversionTask task)
         {
+            var info = await FFmpegHelper.ProbeDetailedAsync(task.InputPath);
             using (var dlg = new VideoEditForm())
             {
-                dlg.TrimStartSeconds = task.TrimStartSeconds;
-                dlg.TrimEndSeconds = task.TrimEndSeconds;
-                dlg.SourceDurationSeconds = task.SourceDurationSeconds;
+                dlg.InputPath = task.InputPath;
+                dlg.SourceDurationSeconds = info.DurationSeconds > 0 ? info.DurationSeconds : task.SourceDurationSeconds;
+                dlg.SourceWidth = info.Width;
+                dlg.SourceHeight = info.Height;
+                dlg.FrameRate = info.FrameRate;
+                dlg.Segments = task.Segments;
+                dlg.Crop = task.Crop;
+                dlg.Rotation = task.Rotation;
+                dlg.MergeSegments = task.MergeSegments;
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
+                    task.Segments = dlg.Segments;
+                    task.Crop = dlg.Crop;
+                    task.Rotation = dlg.Rotation;
+                    task.MergeSegments = dlg.MergeSegments;
                     task.TrimStartSeconds = dlg.TrimStartSeconds;
                     task.TrimEndSeconds = dlg.TrimEndSeconds;
                     var card = _cards.FirstOrDefault(c => c.Task == task);
@@ -1275,9 +1282,12 @@ namespace VideoConverter
 
         private void EnsureOutputDirectory(ConversionTask task)
         {
-            string folder = Path.GetDirectoryName(task.OutputPath);
-            if (!string.IsNullOrEmpty(folder) && !Directory.Exists(folder))
-                Directory.CreateDirectory(folder);
+            foreach (var path in task.GetOutputPaths())
+            {
+                string folder = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(folder) && !Directory.Exists(folder))
+                    Directory.CreateDirectory(folder);
+            }
         }
 
         #endregion

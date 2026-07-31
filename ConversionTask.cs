@@ -63,11 +63,10 @@ namespace VideoConverter
         {
             get
             {
-                // 如果做了剪切，优先用剪切的时长；否则跟随源。
-                if (TrimEndSeconds > TrimStartSeconds && TrimEndSeconds > 0)
-                    return FFmpegHelper.FormatDuration(TrimEndSeconds - TrimStartSeconds);
-                if (TrimStartSeconds > 0)
-                    return FFmpegHelper.FormatDuration(Math.Max(0, EstimateSourceDurationSeconds() - TrimStartSeconds));
+                // 如果做了剪切（Segments），优先用保留段总时长；否则跟随源。
+                double edited = GetEditedDurationSeconds();
+                if (edited > 0 && Math.Abs(edited - EstimateSourceDurationSeconds()) > 0.05)
+                    return FFmpegHelper.FormatDuration(edited);
                 return SourceDuration;
             }
         }
@@ -85,6 +84,39 @@ namespace VideoConverter
 
         public double SourceDurationSeconds { get; set; }
 
+        /// <summary>
+        /// 计算保留段的总时长（秒）。无保留段时返回源时长。
+        /// </summary>
+        public double GetEditedDurationSeconds()
+        {
+            double src = EstimateSourceDurationSeconds();
+            if (Segments == null || Segments.Count == 0) return src;
+            double total = 0;
+            foreach (var seg in Segments)
+                total += Math.Max(0, (seg.EndMs - seg.StartMs) / 1000.0);
+            return total;
+        }
+
+        /// <summary>
+        /// 返回最终输出的文件路径列表（合并模式 1 个，非合并模式 N 个）。
+        /// </summary>
+        public List<string> GetOutputPaths()
+        {
+            var list = new List<string>();
+            string basePath = OutputPath;
+            if (MergeSegments || Segments == null || Segments.Count <= 1)
+            {
+                list.Add(basePath);
+                return list;
+            }
+            string dir = Path.GetDirectoryName(basePath);
+            string nameNoExt = Path.GetFileNameWithoutExtension(basePath);
+            string ext = Path.GetExtension(basePath);
+            for (int i = 0; i < Segments.Count; i++)
+                list.Add(Path.Combine(dir, $"{nameNoExt}_{i + 1}{ext}"));
+            return list;
+        }
+
         // ---- tracks ---------------------------------------------------------
         public List<AudioTrackInfo> AudioTracks { get; set; } = new List<AudioTrackInfo>();
         public List<SubtitleTrackInfo> SubtitleTracks { get; set; } = new List<SubtitleTrackInfo>();
@@ -101,8 +133,30 @@ namespace VideoConverter
         public string AudioTrack { get; set; }
 
         // ---- edit / trim settings -------------------------------------------
+        // Backward-compatible single trim range (kept for legacy callers).
+        // When Segments is populated, it takes precedence.
         public double TrimStartSeconds { get; set; }
         public double TrimEndSeconds { get; set; }
+
+        /// <summary>
+        /// 剪切后保留的视频段（毫秒精度）。为空表示不剪切（保留整段）。
+        /// </summary>
+        public List<VideoSegment> Segments { get; set; } = new List<VideoSegment>();
+
+        /// <summary>
+        /// 多段剪切时是否合并为一个文件；false 则输出多个带序号的文件。
+        /// </summary>
+        public bool MergeSegments { get; set; } = true;
+
+        /// <summary>
+        /// 画面裁剪区域（null 表示不裁剪）。
+        /// </summary>
+        public CropRegion Crop { get; set; }
+
+        /// <summary>
+        /// 画面旋转/翻转。0=不旋转；1=顺时针90°；2=逆时针90°；3=180°；4=水平翻转；5=垂直翻转。
+        /// </summary>
+        public int Rotation { get; set; }
 
         // ---- conversion mode (set right before each run) --------------------
         /// <summary>
@@ -144,6 +198,39 @@ namespace VideoConverter
     }
 
     public enum TaskStatus { Pending, Converting, Completed, Failed }
+
+    /// <summary>
+    /// 视频剪切保留段（毫秒精度）。
+    /// </summary>
+    public class VideoSegment
+    {
+        public long StartMs { get; set; }
+        public long EndMs { get; set; }
+
+        [System.Xml.Serialization.XmlIgnore]
+        public bool IsSelected { get; set; }
+
+        public VideoSegment Clone()
+        {
+            return new VideoSegment { StartMs = StartMs, EndMs = EndMs, IsSelected = IsSelected };
+        }
+    }
+
+    /// <summary>
+    /// 画面裁剪区域。
+    /// </summary>
+    public class CropRegion
+    {
+        public int X { get; set; }
+        public int Y { get; set; }
+        public int Width { get; set; }
+        public int Height { get; set; }
+
+        public CropRegion Clone()
+        {
+            return new CropRegion { X = X, Y = Y, Width = Width, Height = Height };
+        }
+    }
 
     /// <summary>
     /// 一条 ffprobe 探测到的音轨信息。
