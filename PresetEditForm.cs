@@ -1,6 +1,9 @@
 // ============================================================================
 //  PresetEditForm.cs — edit the parameters of a PresetOption.
-//  Dropdown values come from options_spec/format_options.json.
+//  Dropdown values are assembled at runtime from the three-layer spec:
+//    * 公共下拉项（分辨率/帧率/码率/采样率/声道） → options_spec/common_options.json
+//    * 特定类型下拉项（该封装格式支持的编码器） → options_spec/format_options.json
+//    * 默认选中值                                → 预设自身 (options_spec/presets.json)
 //  Built-in presets cannot be overwritten; saving a modified built-in preset
 //  automatically creates a custom preset with the suffix "（自定义）".
 // ============================================================================
@@ -202,12 +205,13 @@ namespace VideoConverter
             {
                 if (Preset == null) Preset = new PresetOption { Name = "自定义" };
 
-                _options = PresetDataStore.GetFormatOptions(Preset.FormatId);
-                if (_options == null || _options.VideoCodecs.Count == 0)
-                    _options = BuildFallbackOptions(Preset);
+                // 下拉项 = 公共选项（common_options.json）+ 该格式的特定编码器
+                // （format_options.json）。预设本身只提供默认选中值。
+                _options = PresetDataStore.GetFormatOptions(Preset.FormatId) ?? new FormatOptions();
+                MergeFallback(_options, Preset);
 
                 LoadCombo(cmbVideoCodec, _options.VideoCodecs, Preset.VideoCodec, "自动");
-                LoadCombo(cmbResolution, _options.Resolutions, Preset.ResolutionValue, "自动");
+                LoadCombo(cmbResolution, _options.Resolutions, Preset.ResolutionValue, "与源文件相同");
                 LoadCombo(cmbFrameRate, _options.FrameRates, Preset.FrameRate, "自动");
                 LoadCombo(cmbVideoBitrate, _options.VideoBitrates, Preset.VideoBitrate, "自动");
                 LoadCombo(cmbAudioCodec, _options.AudioCodecs, Preset.AudioCodec, "自动");
@@ -231,35 +235,69 @@ namespace VideoConverter
             }
         }
 
-        private void LoadCombo(ComboBox cb, List<string> items, string current, string autoText)
+        /// <summary>
+        /// Bind an OptionItem list: the list shows friendly labels, the selected
+        /// value stays the raw ffmpeg value.
+        /// </summary>
+        private void LoadCombo(ComboBox cb, List<OptionItem> items, string current, string autoText)
         {
-            cb.Items.Clear();
-            cb.Items.Add(autoText);
+            var data = new List<OptionItem> { new OptionItem(null, autoText) };
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (items != null)
             {
                 foreach (var item in items)
-                    if (!string.IsNullOrWhiteSpace(item) && !cb.Items.Contains(item))
-                        cb.Items.Add(item);
+                {
+                    if (item == null || string.IsNullOrWhiteSpace(item.Value)) continue;
+                    if (!seen.Add(item.Value)) continue;
+                    data.Add(item);
+                }
             }
 
-            if (!string.IsNullOrWhiteSpace(current) && cb.Items.Contains(current))
-                cb.SelectedItem = current;
-            else
-                cb.SelectedIndex = 0;
+            cb.DataSource = null;
+            cb.DisplayMember = "Label";
+            cb.ValueMember = "Value";
+            cb.DataSource = data;
+
+            int idx = 0;
+            if (!string.IsNullOrWhiteSpace(current))
+            {
+                int found = data.FindIndex(o => string.Equals(o.Value, current, StringComparison.OrdinalIgnoreCase));
+                if (found > 0) idx = found;
+            }
+            cb.SelectedIndex = idx;
         }
 
-        private FormatOptions BuildFallbackOptions(PresetOption p)
+        /// <summary>
+        /// Guarantee the preset's own default is always selectable, even if the
+        /// shared pool happens not to contain it.
+        /// </summary>
+        private void MergeFallback(FormatOptions o, PresetOption p)
         {
-            var o = new FormatOptions();
-            if (!string.IsNullOrWhiteSpace(p.VideoCodec)) o.VideoCodecs.Add(p.VideoCodec);
-            if (!string.IsNullOrWhiteSpace(p.ResolutionValue)) o.Resolutions.Add(p.ResolutionValue);
-            if (!string.IsNullOrWhiteSpace(p.FrameRate)) o.FrameRates.Add(p.FrameRate);
-            if (!string.IsNullOrWhiteSpace(p.VideoBitrate)) o.VideoBitrates.Add(p.VideoBitrate);
-            if (!string.IsNullOrWhiteSpace(p.AudioCodec)) o.AudioCodecs.Add(p.AudioCodec);
-            if (!string.IsNullOrWhiteSpace(p.SampleRate)) o.SampleRates.Add(p.SampleRate);
-            if (!string.IsNullOrWhiteSpace(p.AudioBitrate)) o.AudioBitrates.Add(p.AudioBitrate);
-            o.Channels.AddRange(new[] { "1", "2", "6" });
-            return o;
+            EnsureValue(o.VideoCodecs, p.VideoCodec, p.VideoCodec);
+            EnsureValue(o.AudioCodecs, p.AudioCodec, p.AudioCodec);
+            EnsureValue(o.Resolutions, p.ResolutionValue, p.ResolutionLabel);
+            EnsureValue(o.FrameRates, p.FrameRate, p.FrameRate + " fps");
+            EnsureValue(o.VideoBitrates, p.VideoBitrate, TrimK(p.VideoBitrate) + " kbps");
+            EnsureValue(o.AudioBitrates, p.AudioBitrate, TrimK(p.AudioBitrate) + " kbps");
+            EnsureValue(o.SampleRates, p.SampleRate, p.SampleRate + " Hz");
+            if (p.Channels > 0)
+                EnsureValue(o.Channels, p.Channels.ToString(), p.Channels + " 声道");
+        }
+
+        private static void EnsureValue(List<OptionItem> list, string value, string label)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return;
+            if (list.Any(x => x != null && string.Equals(x.Value, value, StringComparison.OrdinalIgnoreCase)))
+                return;
+            list.Insert(0, new OptionItem(value, string.IsNullOrWhiteSpace(label) ? value : label));
+        }
+
+        private static string TrimK(string bitrate)
+        {
+            if (string.IsNullOrEmpty(bitrate)) return bitrate;
+            return bitrate.EndsWith("k", StringComparison.OrdinalIgnoreCase)
+                ? bitrate.Substring(0, bitrate.Length - 1)
+                : bitrate;
         }
 
         private void BtnSave_Click(object sender, EventArgs e)
@@ -296,6 +334,8 @@ namespace VideoConverter
                 Preset.AudioCodec = GetComboValue(cmbAudioCodec, "copy");
                 if (int.TryParse(GetComboValue(cmbChannel, null), out int ch))
                     Preset.Channels = ch;
+                else
+                    Preset.Channels = 0;
                 Preset.SampleRate = GetComboValue(cmbSampleRate, null);
                 Preset.AudioBitrate = GetComboValue(cmbAudioBitrate, null);
             }
@@ -317,9 +357,11 @@ namespace VideoConverter
 
         private string GetComboValue(ComboBox cb, string defaultValue)
         {
-            if (cb.SelectedIndex <= 0 || cb.SelectedItem == null)
+            if (cb.SelectedIndex <= 0) return defaultValue;
+            var item = cb.SelectedItem as OptionItem;
+            if (item == null || string.IsNullOrWhiteSpace(item.Value))
                 return defaultValue;
-            return cb.SelectedItem.ToString();
+            return item.Value;
         }
     }
 }

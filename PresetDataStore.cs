@@ -1,12 +1,26 @@
 // ============================================================================
-//  PresetDataStore.cs — loads UniConverter-style preset specs from JSON.
-//  Data source: options_spec/presets.json + options_spec/format_options.json
-//  Uses DataContractJsonSerializer (System.Runtime.Serialization) so we do
-//  not depend on System.Web.Extensions at runtime.
+//  PresetDataStore.cs — loads the three-layer UniConverter preset spec.
+//
+//  Layer 1  options_spec/presets.json         预设：类型 / 名称 / 默认参数值
+//  Layer 2  options_spec/common_options.json  公共下拉项（分辨率、帧率、码率、
+//                                             采样率、声道…… 全局去重后只存一份）
+//  Layer 3  options_spec/format_options.json  特定类型下拉项（每个封装格式自己
+//                                             的视频/音频编码器，例如 AVI 只有
+//                                             Xvid / DivX / MS MPEG-4 v3 /
+//                                             MJPEG / H.264 / FFV1）
+//
+//  预设只保存默认值；界面下拉在运行期由「公共项 + 该格式的特定项」拼装。
+//
+//  IMPORTANT — DataContractJsonSerializer 陷阱：
+//    * 反序列化 JSON object 到 Dictionary<string,T> 会「静默」返回空字典且不抛
+//      异常，所以三个文件全部使用纯数组（array）结构。
+//    * 成员按字母序匹配，JSON 必须 sort_keys 输出；类型不符的成员会被静默丢弃，
+//      因此 frameRate 用 double、channel 用 int，不可错配。
 // ============================================================================
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.Serialization;
@@ -19,26 +33,33 @@ namespace VideoConverter
     /// </summary>
     public static class PresetDataStore
     {
-        private static readonly string PresetsPath = Path.Combine(
-            Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? AppDomain.CurrentDomain.BaseDirectory,
-            "options_spec", "presets.json");
-
-        private static readonly string FormatOptionsPath = Path.Combine(
-            Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? AppDomain.CurrentDomain.BaseDirectory,
-            "options_spec", "format_options.json");
+        private static string SpecPath(string fileName)
+        {
+            string baseDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+            if (string.IsNullOrEmpty(baseDir)) baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            return Path.Combine(baseDir, "options_spec", fileName);
+        }
 
         /// <summary>All category names in UI order.</summary>
         public static List<string> Categories { get; private set; } = new List<string>();
 
-        /// <summary>
-        /// Each category maps to a list of formats. Each format has id/title/icon/formatId/presets.
-        /// </summary>
+        /// <summary>Each category maps to a list of formats (id/title/icon/formatId/presets).</summary>
         public static Dictionary<string, List<FormatEntry>> FormatsByCategory { get; private set; }
             = new Dictionary<string, List<FormatEntry>>();
 
-        /// <summary>Raw format options keyed by format ID.</summary>
-        public static Dictionary<string, FormatOptionJson> FormatOptions { get; private set; }
+        /// <summary>Layer 3 — format-specific codec lists, keyed by format ID.</summary>
+        public static Dictionary<string, FormatOptionJson> FormatSpecs { get; private set; }
             = new Dictionary<string, FormatOptionJson>();
+
+        /// <summary>Layer 2 — shared dropdown pools, stored once for the whole app.</summary>
+        public static CommonOptionsJson Common { get; private set; } = new CommonOptionsJson();
+
+        /// <summary>FourCC -> ffmpeg encoder, aggregated from every format entry.</summary>
+        private static readonly Dictionary<string, CodecJson> VideoCodecIndex =
+            new Dictionary<string, CodecJson>(StringComparer.OrdinalIgnoreCase);
+
+        private static readonly Dictionary<string, CodecJson> AudioCodecIndex =
+            new Dictionary<string, CodecJson>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>Last load exception, if any. Useful for diagnostics.</summary>
         public static Exception LoadException { get; private set; }
@@ -52,67 +73,93 @@ namespace VideoConverter
         public static void AddRecent(PresetOption preset)
         {
             if (preset == null) return;
-            // Remove existing identical entry.
             RecentPresets.RemoveAll(p => p.PresetId == preset.PresetId && p.Name == preset.Name && p.FormatId == preset.FormatId);
             RecentPresets.Insert(0, preset.Clone());
             if (RecentPresets.Count > 20)
                 RecentPresets.RemoveAt(RecentPresets.Count - 1);
         }
 
+        // ------------------------------------------------------------------ //
+        //  Loading
+        // ------------------------------------------------------------------ //
+
         public static void Load()
         {
             LoadException = null;
             Categories = new List<string>();
             FormatsByCategory = new Dictionary<string, List<FormatEntry>>();
-            FormatOptions = new Dictionary<string, FormatOptionJson>();
+            FormatSpecs = new Dictionary<string, FormatOptionJson>();
+            Common = new CommonOptionsJson();
+            VideoCodecIndex.Clear();
+            AudioCodecIndex.Clear();
 
             PresetsRoot presetsRoot = null;
-            Dictionary<string, FormatOptionJson> formatRoot = null;
 
             try
             {
-                if (File.Exists(PresetsPath))
+                Common = ReadJson<CommonOptionsJson>(SpecPath("common_options.json")) ?? new CommonOptionsJson();
+
+                var formatRoot = ReadJson<FormatOptionsRoot>(SpecPath("format_options.json"));
+                if (formatRoot?.formats != null)
                 {
-                    using (var fs = new FileStream(PresetsPath, FileMode.Open, FileAccess.Read))
+                    foreach (var f in formatRoot.formats)
                     {
-                        var ser = new DataContractJsonSerializer(typeof(PresetsRoot));
-                        presetsRoot = ser.ReadObject(fs) as PresetsRoot;
+                        if (f == null || string.IsNullOrEmpty(f.id)) continue;
+                        FormatSpecs[f.id] = f;
+                        IndexCodecs(f);
                     }
                 }
 
-                if (File.Exists(FormatOptionsPath))
-                {
-                    using (var fs = new FileStream(FormatOptionsPath, FileMode.Open, FileAccess.Read))
-                    {
-                        var ser = new DataContractJsonSerializer(typeof(Dictionary<string, FormatOptionJson>));
-                        formatRoot = ser.ReadObject(fs) as Dictionary<string, FormatOptionJson>;
-                    }
-                }
+                presetsRoot = ReadJson<PresetsRoot>(SpecPath("presets.json"));
             }
             catch (Exception ex)
             {
                 LoadException = ex;
             }
 
-            if (formatRoot != null)
-                FormatOptions = formatRoot;
-
             BuildIndex(presetsRoot);
+
+            // Array-shaped JSON never throws on shape mismatch, so treat "nothing
+            // loaded" as a failure too — the caller falls back to built-in presets.
+            if (!IsLoaded && LoadException == null)
+                LoadException = new InvalidDataException(
+                    "options_spec 下未读取到任何预设（presets.json 缺失或结构不符）。");
+        }
+
+        private static T ReadJson<T>(string path) where T : class
+        {
+            if (!File.Exists(path)) return null;
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read))
+            {
+                var ser = new DataContractJsonSerializer(typeof(T));
+                return ser.ReadObject(fs) as T;
+            }
+        }
+
+        private static void IndexCodecs(FormatOptionJson f)
+        {
+            if (f.videoCodecs != null)
+                foreach (var c in f.videoCodecs)
+                    if (c != null && !string.IsNullOrEmpty(c.fourCC) && !VideoCodecIndex.ContainsKey(c.fourCC))
+                        VideoCodecIndex[c.fourCC] = c;
+
+            if (f.audioCodecs != null)
+                foreach (var c in f.audioCodecs)
+                    if (c != null && !string.IsNullOrEmpty(c.fourCC) && !AudioCodecIndex.ContainsKey(c.fourCC))
+                        AudioCodecIndex[c.fourCC] = c;
         }
 
         private static void BuildIndex(PresetsRoot root)
         {
             if (root?.categories == null) return;
 
-            foreach (var kv in root.categories)
+            foreach (var cat in root.categories)
             {
-                string catName = kv.Key;
-                var formats = kv.Value;
-                if (formats == null) continue;
+                if (cat == null || string.IsNullOrEmpty(cat.name) || cat.formats == null) continue;
 
-                Categories.Add(catName);
+                Categories.Add(cat.name);
                 var list = new List<FormatEntry>();
-                foreach (var fmt in formats)
+                foreach (var fmt in cat.formats)
                 {
                     if (fmt == null) continue;
                     var entry = new FormatEntry
@@ -124,48 +171,33 @@ namespace VideoConverter
                     };
 
                     if (fmt.presets != null)
-                    {
                         foreach (var p in fmt.presets)
-                        {
-                            if (p == null) continue;
-                            entry.Presets.Add(ToPresetOption(p, entry));
-                        }
-                    }
+                            if (p != null)
+                                entry.Presets.Add(ToPresetOption(p, entry));
 
                     list.Add(entry);
                 }
-                FormatsByCategory[catName] = list;
+                FormatsByCategory[cat.name] = list;
             }
         }
 
         private static PresetOption ToPresetOption(PresetJson p, FormatEntry format)
         {
-            string name = p.name ?? string.Empty;
-            string fmtId = p.formatId ?? format.FormatId;
-            string fourCC = p.fourCC ?? string.Empty;
-            bool keep = p.keepSource;
+            string fmtId = string.IsNullOrEmpty(p.formatId) ? format.FormatId : p.formatId;
+            FormatOptionJson fmtOpt;
+            FormatSpecs.TryGetValue(fmtId ?? string.Empty, out fmtOpt);
 
             string ext = ".mp4";
-            FormatOptionJson fmtOpt = null;
-            if (FormatOptions.ContainsKey(fmtId))
-                fmtOpt = FormatOptions[fmtId];
             if (fmtOpt != null && !string.IsNullOrEmpty(fmtOpt.extension))
                 ext = "." + fmtOpt.extension;
             else if (!string.IsNullOrEmpty(format.Title))
                 ext = "." + format.Title.ToLowerInvariant();
 
-            int w = 0, h = 0;
-            if (p.resolution != null)
-            {
-                w = p.resolution.width;
-                h = p.resolution.height;
-            }
-
-            if (keep)
+            if (p.keepSource)
             {
                 return new PresetOption
                 {
-                    Name = name,
+                    Name = p.name ?? string.Empty,
                     FormatName = format.Title,
                     Extension = ext,
                     VideoCodec = "copy",
@@ -177,35 +209,67 @@ namespace VideoConverter
                     FrameRate = null,
                     PresetId = p.id,
                     FormatId = fmtId,
-                    FourCC = fourCC,
+                    FourCC = p.fourCC ?? string.Empty,
                     KeepSource = true,
                     IsBuiltIn = true,
                 };
             }
 
-            string ffmpegVideoCodec = FourCCToVideoCodec(p.defaultVideoCodec, fourCC);
-            string ffmpegAudioCodec = FourCCToAudioCodec(p.defaultAudioCodec);
+            int w = p.resolution != null ? p.resolution.width : 0;
+            int h = p.resolution != null ? p.resolution.height : 0;
 
             return new PresetOption
             {
-                Name = name,
+                Name = p.name ?? string.Empty,
                 FormatName = format.Title,
                 Extension = ext,
-                VideoCodec = ffmpegVideoCodec,
-                AudioCodec = ffmpegAudioCodec,
+                VideoCodec = ResolveVideoEncoder(p.videoCodec, fmtOpt),
+                AudioCodec = ResolveAudioEncoder(p.audioCodec, fmtOpt),
                 ResolutionLabel = w > 0 && h > 0 ? string.Format("{0} x {1}", w, h) : "与源文件相同",
                 ResolutionValue = w > 0 && h > 0 ? string.Format("{0}x{1}", w, h) : null,
-                VideoBitrate = p.defaultBitrate > 0 ? p.defaultBitrate + "k" : null,
-                AudioBitrate = p.defaultAudioBitrate > 0 ? p.defaultAudioBitrate + "k" : null,
-                FrameRate = p.defaultFrameRate > 0 ? p.defaultFrameRate.ToString() : null,
-                SampleRate = p.defaultSampleRate > 0 ? p.defaultSampleRate.ToString() : null,
-                Channels = p.defaultChannel > 0 ? p.defaultChannel : 0,
+                VideoBitrate = p.videoBitrate > 0 ? p.videoBitrate + "k" : null,
+                AudioBitrate = p.audioBitrate > 0 ? p.audioBitrate + "k" : null,
+                FrameRate = p.frameRate > 0 ? FormatFps(p.frameRate) : null,
+                SampleRate = p.sampleRate > 0 ? p.sampleRate.ToString(CultureInfo.InvariantCulture) : null,
+                Channels = p.channel > 0 ? p.channel : 0,
                 PresetId = p.id,
                 FormatId = fmtId,
-                FourCC = fourCC,
+                FourCC = p.fourCC ?? string.Empty,
                 KeepSource = false,
                 IsBuiltIn = true,
             };
+        }
+
+        // ------------------------------------------------------------------ //
+        //  Codec resolution — FourCC is looked up in the format's own list
+        //  first (layer 3), then in the global index. No hard-coded table.
+        // ------------------------------------------------------------------ //
+
+        private static string ResolveVideoEncoder(string fourCC, FormatOptionJson fmt)
+        {
+            var c = FindCodec(fourCC, fmt?.videoCodecs, VideoCodecIndex);
+            if (c != null) return c.encoder;
+            return string.IsNullOrEmpty(fourCC) ? "copy" : fourCC.ToLowerInvariant();
+        }
+
+        private static string ResolveAudioEncoder(string fourCC, FormatOptionJson fmt)
+        {
+            if (string.IsNullOrEmpty(fourCC)) return string.Empty;   // 无音频轨（如图片）
+            var c = FindCodec(fourCC, fmt?.audioCodecs, AudioCodecIndex);
+            return c != null ? c.encoder : fourCC.ToLowerInvariant();
+        }
+
+        private static CodecJson FindCodec(string fourCC, List<CodecJson> local, Dictionary<string, CodecJson> global)
+        {
+            if (string.IsNullOrEmpty(fourCC)) return null;
+            if (local != null)
+            {
+                var hit = local.FirstOrDefault(c => c != null &&
+                    string.Equals(c.fourCC, fourCC, StringComparison.OrdinalIgnoreCase));
+                if (hit != null) return hit;
+            }
+            CodecJson g;
+            return global.TryGetValue(fourCC, out g) ? g : null;
         }
 
         public static FormatEntry FindFormat(string formatId)
@@ -219,210 +283,193 @@ namespace VideoConverter
             return null;
         }
 
+        // ------------------------------------------------------------------ //
+        //  Dropdown assembly: common pool + format-specific codecs
+        // ------------------------------------------------------------------ //
+
         /// <summary>
-        /// Return video/audio dropdown options for a given format ID.
+        /// Build every dropdown for a format: the codec lists come from
+        /// format_options.json (layer 3), everything else from
+        /// common_options.json (layer 2).
         /// </summary>
         public static FormatOptions GetFormatOptions(string formatId)
         {
             var result = new FormatOptions();
-            if (string.IsNullOrEmpty(formatId) || !FormatOptions.ContainsKey(formatId))
-                return result;
 
-            var fmt = FormatOptions[formatId];
-            if (fmt?.videoOptions != null)
-            {
-                foreach (var vo in fmt.videoOptions)
-                {
-                    if (vo == null) continue;
-                    result.VideoCodecs.Add(FourCCToVideoCodec(vo.codec, fmt.fourcc));
+            FormatOptionJson fmt = null;
+            if (!string.IsNullOrEmpty(formatId))
+                FormatSpecs.TryGetValue(formatId, out fmt);
 
-                    if (vo.resolution != null && vo.resolution.width > 0 && vo.resolution.height > 0)
-                        result.Resolutions.Add(string.Format("{0}x{1}", vo.resolution.width, vo.resolution.height));
+            // ---- layer 3: codecs specific to this container ----
+            if (fmt?.videoCodecs != null)
+                foreach (var c in fmt.videoCodecs)
+                    if (c != null && !string.IsNullOrEmpty(c.encoder))
+                        result.VideoCodecs.Add(new OptionItem(c.encoder, BuildCodecLabel(c)));
 
-                    if (vo.bitrates != null)
-                        foreach (var b in vo.bitrates) result.VideoBitrates.Add(b + "k");
+            if (fmt?.audioCodecs != null)
+                foreach (var c in fmt.audioCodecs)
+                    if (c != null && !string.IsNullOrEmpty(c.encoder))
+                        result.AudioCodecs.Add(new OptionItem(c.encoder, BuildCodecLabel(c)));
 
-                    if (vo.frameRates != null)
-                        foreach (var f in vo.frameRates) result.FrameRates.Add(f.ToString());
-                }
-            }
+            // ---- layer 2: shared pools ----
+            if (Common.resolutions != null)
+                foreach (var r in Common.resolutions)
+                    if (r != null && r.width > 0 && r.height > 0)
+                        result.Resolutions.Add(new OptionItem(
+                            string.Format("{0}x{1}", r.width, r.height),
+                            string.IsNullOrEmpty(r.label) ? string.Format("{0} x {1}", r.width, r.height) : r.label));
 
-            if (fmt?.audioOptions != null)
-            {
-                foreach (var ao in fmt.audioOptions)
-                {
-                    if (ao == null) continue;
-                    result.AudioCodecs.Add(FourCCToAudioCodec(ao.codec));
+            if (Common.frameRates != null)
+                foreach (var f in Common.frameRates)
+                    if (f > 0)
+                        result.FrameRates.Add(new OptionItem(FormatFps(f), FormatFps(f) + " fps"));
 
-                    if (ao.sampleRates != null)
-                        foreach (var s in ao.sampleRates) result.SampleRates.Add(s.ToString());
+            if (Common.videoBitrates != null)
+                foreach (var b in Common.videoBitrates)
+                    if (b > 0)
+                        result.VideoBitrates.Add(new OptionItem(b + "k", b + " kbps"));
 
-                    if (ao.bitrates != null)
-                        foreach (var b in ao.bitrates) result.AudioBitrates.Add(b + "k");
+            if (Common.audioBitrates != null)
+                foreach (var b in Common.audioBitrates)
+                    if (b > 0)
+                        result.AudioBitrates.Add(new OptionItem(b + "k", b + " kbps"));
 
-                    if (ao.channels != null)
-                        foreach (var c in ao.channels) result.Channels.Add(c.ToString());
-                }
-            }
+            if (Common.sampleRates != null)
+                foreach (var s in Common.sampleRates)
+                    if (s > 0)
+                        result.SampleRates.Add(new OptionItem(s.ToString(CultureInfo.InvariantCulture), s + " Hz"));
 
-            result.VideoCodecs = result.VideoCodecs.Distinct().ToList();
-            result.Resolutions = result.Resolutions.Distinct().ToList();
-            result.VideoBitrates = result.VideoBitrates.Distinct().ToList();
-            result.FrameRates = result.FrameRates.Distinct().ToList();
-            result.AudioCodecs = result.AudioCodecs.Distinct().ToList();
-            result.SampleRates = result.SampleRates.Distinct().ToList();
-            result.AudioBitrates = result.AudioBitrates.Distinct().ToList();
-            result.Channels = result.Channels.Distinct().ToList();
+            if (Common.channels != null)
+                foreach (var c in Common.channels)
+                    if (c != null && c.value > 0)
+                        result.Channels.Add(new OptionItem(
+                            c.value.ToString(CultureInfo.InvariantCulture),
+                            string.IsNullOrEmpty(c.label) ? c.value + " 声道" : c.label));
 
             return result;
         }
 
-        private static string FourCCToVideoCodec(string fourCC, string containerFourCC)
+        private static string BuildCodecLabel(CodecJson c)
         {
-            string f = (fourCC ?? string.Empty).Trim().ToUpperInvariant();
-            switch (f)
-            {
-                case "H264":
-                case "B264": return "libx264";
-                case "HEVC":
-                case "X265": return "libx265";
-                case "MP4V": return "mpeg4";
-                case "XVID":
-                case "DIVX": return "libxvid";
-                case "MJPG": return "mjpeg";
-                case "AV1": return "libsvtav1";
-                case "CFHD": return "cfhd";
-                case "FFV1": return "ffv1";
-                case "MP43": return "msmpeg4v3";
-                case "HAVC": return "libx264";
-                case "": return string.IsNullOrEmpty(containerFourCC) ? "libx264" : "copy";
-                default: return f.ToLowerInvariant();
-            }
+            if (string.IsNullOrEmpty(c.label)) return c.encoder;
+            return string.Equals(c.label, c.encoder, StringComparison.OrdinalIgnoreCase)
+                ? c.label
+                : c.label + " (" + c.encoder + ")";
         }
 
-        private static string FourCCToAudioCodec(string fourCC)
+        /// <summary>23.97 -> "23.97", 30.0 -> "30" (invariant, ffmpeg-safe).</summary>
+        internal static string FormatFps(double fps)
         {
-            string f = (fourCC ?? string.Empty).Trim().ToUpperInvariant();
-            switch (f)
-            {
-                case "AAC":
-                case "MAAC": return "aac";
-                case "MP3": return "libmp3lame";
-                case "AC3": return "ac3";
-                case "EAC3": return "eac3";
-                case "FLAC": return "flac";
-                case "OPUS": return "libopus";
-                case "VORBIS": return "libvorbis";
-                case "0": return string.Empty;
-                case "": return "aac";
-                default: return f.ToLowerInvariant();
-            }
+            return fps == Math.Floor(fps)
+                ? ((int)fps).ToString(CultureInfo.InvariantCulture)
+                : fps.ToString("0.###", CultureInfo.InvariantCulture);
         }
     }
 
-    #region JSON data contracts
+    #region JSON data contracts — all containers are ARRAYS on purpose
 
     [DataContract]
     public class PresetsRoot
     {
-        [DataMember]
-        public Dictionary<string, List<FormatJson>> categories { get; set; }
+        [DataMember] public List<CategoryJson> categories { get; set; }
+    }
+
+    [DataContract]
+    public class CategoryJson
+    {
+        [DataMember] public string name { get; set; }
+        [DataMember] public List<FormatJson> formats { get; set; }
     }
 
     [DataContract]
     public class FormatJson
     {
-        [DataMember]
-        public string id { get; set; }
-        [DataMember]
-        public string title { get; set; }
-        [DataMember]
-        public string icon { get; set; }
-        [DataMember]
-        public string formatId { get; set; }
-        [DataMember]
-        public List<PresetJson> presets { get; set; }
+        [DataMember] public string id { get; set; }
+        [DataMember] public string title { get; set; }
+        [DataMember] public string icon { get; set; }
+        [DataMember] public string formatId { get; set; }
+        [DataMember] public List<PresetJson> presets { get; set; }
     }
 
     [DataContract]
     public class PresetJson
     {
-        [DataMember]
-        public string id { get; set; }
-        [DataMember]
-        public string name { get; set; }
-        [DataMember]
-        public string formatId { get; set; }
-        [DataMember]
-        public string fourCC { get; set; }
-        [DataMember]
-        public bool keepSource { get; set; }
-        [DataMember]
-        public string defaultVideoCodec { get; set; }
-        [DataMember]
-        public ResolutionJson resolution { get; set; }
-        [DataMember]
-        public int defaultBitrate { get; set; }
-        [DataMember]
-        public int defaultFrameRate { get; set; }
-        [DataMember]
-        public string defaultAudioCodec { get; set; }
-        [DataMember]
-        public int defaultChannel { get; set; }
-        [DataMember]
-        public int defaultSampleRate { get; set; }
-        [DataMember]
-        public int defaultAudioBitrate { get; set; }
+        [DataMember] public string id { get; set; }
+        [DataMember] public string name { get; set; }
+        [DataMember] public string formatId { get; set; }
+        [DataMember] public string fourCC { get; set; }
+        [DataMember] public bool keepSource { get; set; }
+        [DataMember] public string videoCodec { get; set; }
+        [DataMember] public ResolutionJson resolution { get; set; }
+        [DataMember] public int videoBitrate { get; set; }
+        [DataMember] public double frameRate { get; set; }
+        [DataMember] public string audioCodec { get; set; }
+        [DataMember] public int channel { get; set; }
+        [DataMember] public int sampleRate { get; set; }
+        [DataMember] public int audioBitrate { get; set; }
     }
 
     [DataContract]
     public class ResolutionJson
     {
-        [DataMember]
-        public int width { get; set; }
-        [DataMember]
-        public int height { get; set; }
+        [DataMember] public int width { get; set; }
+        [DataMember] public int height { get; set; }
+    }
+
+    // ---- common_options.json ------------------------------------------------
+
+    [DataContract]
+    public class CommonOptionsJson
+    {
+        [DataMember] public List<ResolutionOptionJson> resolutions { get; set; }
+        [DataMember] public List<double> frameRates { get; set; }
+        [DataMember] public List<int> videoBitrates { get; set; }
+        [DataMember] public List<int> audioBitrates { get; set; }
+        [DataMember] public List<int> sampleRates { get; set; }
+        [DataMember] public List<ChannelOptionJson> channels { get; set; }
+    }
+
+    [DataContract]
+    public class ResolutionOptionJson
+    {
+        [DataMember] public int id { get; set; }
+        [DataMember] public int width { get; set; }
+        [DataMember] public int height { get; set; }
+        [DataMember] public string label { get; set; }
+    }
+
+    [DataContract]
+    public class ChannelOptionJson
+    {
+        [DataMember] public int value { get; set; }
+        [DataMember] public string label { get; set; }
+    }
+
+    // ---- format_options.json ------------------------------------------------
+
+    [DataContract]
+    public class FormatOptionsRoot
+    {
+        [DataMember] public List<FormatOptionJson> formats { get; set; }
     }
 
     [DataContract]
     public class FormatOptionJson
     {
-        [DataMember]
-        public string formatId { get; set; }
-        [DataMember]
-        public string extension { get; set; }
-        [DataMember]
-        public string fourcc { get; set; }
-        [DataMember]
-        public List<VideoOptionJson> videoOptions { get; set; }
-        [DataMember]
-        public List<AudioOptionJson> audioOptions { get; set; }
+        [DataMember] public string id { get; set; }
+        [DataMember] public string name { get; set; }
+        [DataMember] public string fourCC { get; set; }
+        [DataMember] public string extension { get; set; }
+        [DataMember] public List<CodecJson> videoCodecs { get; set; }
+        [DataMember] public List<CodecJson> audioCodecs { get; set; }
     }
 
     [DataContract]
-    public class VideoOptionJson
+    public class CodecJson
     {
-        [DataMember]
-        public string codec { get; set; }
-        [DataMember]
-        public ResolutionJson resolution { get; set; }
-        [DataMember]
-        public List<int> bitrates { get; set; }
-        [DataMember]
-        public List<int> frameRates { get; set; }
-    }
-
-    [DataContract]
-    public class AudioOptionJson
-    {
-        [DataMember]
-        public string codec { get; set; }
-        [DataMember]
-        public List<int> sampleRates { get; set; }
-        [DataMember]
-        public List<int> bitrates { get; set; }
-        [DataMember]
-        public List<int> channels { get; set; }
+        [DataMember] public string fourCC { get; set; }
+        [DataMember] public string label { get; set; }
+        [DataMember] public string encoder { get; set; }
     }
 
     #endregion
@@ -436,15 +483,33 @@ namespace VideoConverter
         public List<PresetOption> Presets { get; set; } = new List<PresetOption>();
     }
 
+    /// <summary>A dropdown entry: friendly label for the UI, raw value for ffmpeg.</summary>
+    public class OptionItem
+    {
+        public string Value { get; set; }
+        public string Label { get; set; }
+
+        public OptionItem() { }
+
+        public OptionItem(string value, string label)
+        {
+            Value = value;
+            Label = label;
+        }
+
+        public override string ToString() => Label ?? Value ?? string.Empty;
+    }
+
+    /// <summary>All dropdown lists for one output format.</summary>
     public class FormatOptions
     {
-        public List<string> VideoCodecs { get; set; } = new List<string>();
-        public List<string> Resolutions { get; set; } = new List<string>();
-        public List<string> VideoBitrates { get; set; } = new List<string>();
-        public List<string> FrameRates { get; set; } = new List<string>();
-        public List<string> AudioCodecs { get; set; } = new List<string>();
-        public List<string> SampleRates { get; set; } = new List<string>();
-        public List<string> AudioBitrates { get; set; } = new List<string>();
-        public List<string> Channels { get; set; } = new List<string>();
+        public List<OptionItem> VideoCodecs { get; set; } = new List<OptionItem>();
+        public List<OptionItem> Resolutions { get; set; } = new List<OptionItem>();
+        public List<OptionItem> VideoBitrates { get; set; } = new List<OptionItem>();
+        public List<OptionItem> FrameRates { get; set; } = new List<OptionItem>();
+        public List<OptionItem> AudioCodecs { get; set; } = new List<OptionItem>();
+        public List<OptionItem> SampleRates { get; set; } = new List<OptionItem>();
+        public List<OptionItem> AudioBitrates { get; set; } = new List<OptionItem>();
+        public List<OptionItem> Channels { get; set; } = new List<OptionItem>();
     }
 }
