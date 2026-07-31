@@ -226,20 +226,36 @@ namespace VideoConverter
         public string AudioBitrate { get; set; }
         public string FrameRate { get; set; }
 
+        // ---- fields populated from UniConverter preset database ----
+        public string PresetId { get; set; }
+        public string FormatId { get; set; }
+        public string FourCC { get; set; }
+        public bool KeepSource { get; set; }
+        public string SampleRate { get; set; }
+        public int Channels { get; set; }
+
         public string GetExtension()
         {
             return string.IsNullOrEmpty(Extension) ? ".mp4" : Extension;
         }
 
+        /// <summary>
+        /// Return a shallow copy so per-task edits do not affect the shared store entry.
+        /// </summary>
+        public PresetOption Clone()
+        {
+            return (PresetOption)this.MemberwiseClone();
+        }
+
         // ---- built-in common presets ---------------------------------------
         public static readonly PresetOption MP4_SameAsSource = new PresetOption
         {
-            Name = "MP4 Same as source",
+            Name = "MP4 与源文件相同",
             FormatName = "MP4",
             Extension = ".mp4",
             VideoCodec = "copy",
             AudioCodec = "copy",
-            ResolutionLabel = "Same as source",
+            ResolutionLabel = "与源文件相同",
             ResolutionValue = null,
             VideoBitrate = null,
             AudioBitrate = null,
@@ -276,7 +292,7 @@ namespace VideoConverter
 
         public static readonly PresetOption MP4_720 = new PresetOption
         {
-            Name = "MP4 720",
+            Name = "MP4 720P",
             FormatName = "MP4",
             Extension = ".mp4",
             VideoCodec = "libx264",
@@ -290,7 +306,7 @@ namespace VideoConverter
 
         public static readonly PresetOption MP4_480 = new PresetOption
         {
-            Name = "MP4 480",
+            Name = "MP4 480P",
             FormatName = "MP4",
             Extension = ".mp4",
             VideoCodec = "libx264",
@@ -344,10 +360,36 @@ namespace VideoConverter
             FrameRate = "30"
         };
 
-        public static readonly PresetOption[] All = new[]
+        /// <summary>
+        /// Defaults used when the external preset database is not available.
+        /// </summary>
+        public static PresetOption[] BuiltInAll => new[]
         {
             MP4_SameAsSource, MP4_4K, MP4_1080, MP4_720, MP4_480,
             AVI_XVID, MKV_H264, MOV_H264
         };
+
+        /// <summary>
+        /// All presets loaded from options_spec/presets.json, falling back to built-ins.
+        /// </summary>
+        public static PresetOption[] All
+        {
+            get
+            {
+                try
+                {
+                    var list = new System.Collections.Generic.List<PresetOption>();
+                    foreach (var cat in PresetDataStore.Categories)
+                    {
+                        if (!PresetDataStore.FormatsByCategory.ContainsKey(cat)) continue;
+                        foreach (var fmt in PresetDataStore.FormatsByCategory[cat])
+                            list.AddRange(fmt.Presets);
+                    }
+                    if (list.Count > 0) return list.ToArray();
+                }
+                catch { }
+                return BuiltInAll;
+            }
+        }
     }
 }

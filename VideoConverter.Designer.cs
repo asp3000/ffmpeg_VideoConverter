@@ -210,7 +210,7 @@ namespace VideoConverter
             this.convertAllButton.Name = "convertAllButton";
             this.convertAllButton.Size = new System.Drawing.Size(172, 40);
             this.convertAllButton.TabIndex = 5;
-            this.convertAllButton.Text = "Convert All";
+            this.convertAllButton.Text = "全部转换";
             this.convertAllButton.UseVisualStyleBackColor = false;
             this.convertAllButton.Click += new System.EventHandler(this.ConvertAllButton_Click);
             // 
@@ -224,7 +224,7 @@ namespace VideoConverter
             this.mergeCheck.Name = "mergeCheck";
             this.mergeCheck.Size = new System.Drawing.Size(111, 21);
             this.mergeCheck.TabIndex = 4;
-            this.mergeCheck.Text = "Merge All Files";
+            this.mergeCheck.Text = "合并所有文件";
             this.mergeCheck.UseVisualStyleBackColor = true;
             // 
             // saveToCombo
@@ -248,7 +248,7 @@ namespace VideoConverter
             this.labelSaveTo.Name = "labelSaveTo";
             this.labelSaveTo.Size = new System.Drawing.Size(54, 17);
             this.labelSaveTo.TabIndex = 2;
-            this.labelSaveTo.Text = "Save to";
+            this.labelSaveTo.Text = "保存到";
             // 
             // convertToCombo
             // 
@@ -270,11 +270,11 @@ namespace VideoConverter
             this.labelConvertTo.Name = "labelConvertTo";
             this.labelConvertTo.Size = new System.Drawing.Size(64, 17);
             this.labelConvertTo.TabIndex = 0;
-            this.labelConvertTo.Text = "Convert to";
+            this.labelConvertTo.Text = "转换到";
             // 
             // openFileDialog
             // 
-            this.openFileDialog.Filter = "Video files|*.mp4;*.mkv;*.avi;*.mov;*.wmv;*.flv;*.webm;*.m4v|All files|*.*";
+            this.openFileDialog.Filter = "视频文件|*.mp4;*.mkv;*.avi;*.mov;*.wmv;*.flv;*.webm;*.m4v|所有文件|*.*";
             this.openFileDialog.Multiselect = true;
             this.openFileDialog.Title = "添加视频文件";
             // 
@@ -293,7 +293,7 @@ namespace VideoConverter
             this.Name = "VideoConverter";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Tag = "no-theme";
-            this.Text = "Video Converter";
+            this.Text = "视频转换器";
             this.topPanel.ResumeLayout(false);
             this.topPanel.PerformLayout();
             this.bottomPanel.ResumeLayout(false);

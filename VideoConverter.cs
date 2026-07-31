@@ -40,6 +40,9 @@ namespace VideoConverter
             }
             catch { }
 
+            // Load UniConverter preset database.
+            PresetDataStore.Load();
+
             // Allow dropping files anywhere on the window / list.
             this.AllowDrop = true;
             this.taskListPanel.AllowDrop = true;
@@ -64,10 +67,36 @@ namespace VideoConverter
 
         private void SetupPresets()
         {
-            convertToCombo.DisplayMember = "Name";
-            convertToCombo.ValueMember = "Name";
-            convertToCombo.DataSource = PresetOption.All.ToList();
-            convertToCombo.SelectedItem = PresetOption.MP4_1080;
+            // Bottom "Convert to" shows one representative preset per output format (e.g. MP4, AVI).
+            var formatPresets = new List<PresetOption>();
+            foreach (var cat in PresetDataStore.Categories)
+            {
+                if (!PresetDataStore.FormatsByCategory.ContainsKey(cat)) continue;
+                foreach (var fmt in PresetDataStore.FormatsByCategory[cat])
+                {
+                    if (fmt.Presets.Count == 0) continue;
+                    // Pick the "Same as source" preset if available, otherwise the first one.
+                    var rep = fmt.Presets.FirstOrDefault(p => p.KeepSource)
+                              ?? fmt.Presets[0];
+                    formatPresets.Add(rep);
+                }
+            }
+
+            // Fallback to built-ins if the JSON store is empty.
+            if (formatPresets.Count == 0)
+                formatPresets.AddRange(PresetOption.BuiltInAll);
+
+            convertToCombo.DisplayMember = "FormatName";
+            convertToCombo.ValueMember = "FormatId";
+            convertToCombo.DataSource = formatPresets;
+
+            var defaultMp4 = formatPresets.FirstOrDefault(p =>
+                string.Equals(p.FormatName, "MP4", StringComparison.OrdinalIgnoreCase) &&
+                p.Name.Contains("1080"))
+                ?? formatPresets.FirstOrDefault(p =>
+                    string.Equals(p.FormatName, "MP4", StringComparison.OrdinalIgnoreCase))
+                ?? formatPresets[0];
+            convertToCombo.SelectedItem = defaultMp4;
         }
 
         private void SetupSaveTo()
@@ -292,12 +321,6 @@ namespace VideoConverter
             cardPanel.Controls.Add(playOverlay);
             playOverlay.BringToFront();
 
-            // Two small buttons under the preview.
-            var btnCut = CreateIconButton("✂", 12, 100, "剪辑");
-            var btnCrop = CreateIconButton("⛶", 50, 100, "裁剪");
-            cardPanel.Controls.Add(btnCut);
-            cardPanel.Controls.Add(btnCrop);
-
             // ---- Input column ----
             int inputX = 174;
             int row1Y = 12;
@@ -419,23 +442,20 @@ namespace VideoConverter
 
             // Row 4: preset dropdown + gear + subtitle + audio.
             int r4x = outputX;
-            var cmbPreset = CreateDropDown(r4x, row4Y, 110);
+            var cmbPreset = CreateDropDown(r4x, row4Y, 140);
             cmbPreset.DisplayMember = "Name";
             cmbPreset.ValueMember = "Name";
-            cmbPreset.DataSource = PresetOption.All.ToList();
+            cmbPreset.Items.Add(task.Preset);
             cmbPreset.SelectedItem = task.Preset;
-            cmbPreset.SelectedIndexChanged += (s, e) =>
+            // Intercept the dropdown arrow click and show the full preset selector.
+            cmbPreset.DropDown += (s, e) =>
             {
-                task.Preset = cmbPreset.SelectedItem as PresetOption ?? task.Preset;
-                lblOutName.Text = task.GetOutputFileName();
-                toolTip.SetToolTip(lblOutName, task.OutputPath);
-                lblOutFormat.Text = "格式: " + task.TargetFormat;
-                lblOutResolution.Text = "分辨率: " + task.TargetResolution;
-                lblOutSize.Text = "预计大小: " + EstimateTargetSizeFromTask(task);
+                cmbPreset.DroppedDown = false;
+                OpenPresetSelection(task, cmbPreset, lblOutFormat, lblOutResolution, lblOutSize);
             };
             cardPanel.Controls.Add(cmbPreset);
 
-            var btnPresetSettings = CreateIconButton("⚙", r4x + 114, row4Y - 1, "预设编辑");
+            var btnPresetSettings = CreateIconButton("⚙", r4x + 144, row4Y - 1, "预设编辑");
             btnPresetSettings.Click += (s, e) => OpenPresetEdit(task, cmbPreset, lblOutFormat, lblOutResolution, lblOutSize);
             cardPanel.Controls.Add(btnPresetSettings);
 
@@ -646,6 +666,18 @@ namespace VideoConverter
             }
         }
 
+        private void OpenPresetSelection(ConversionTask task, ComboBox presetCombo, Label lblFormat, Label lblResolution, Label lblSize)
+        {
+            using (var dlg = new PresetSelectionForm())
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedPreset != null)
+                {
+                    task.Preset = dlg.SelectedPreset;
+                    RefreshPresetCombo(presetCombo, task, lblFormat, lblResolution, lblSize);
+                }
+            }
+        }
+
         private void OpenPresetEdit(ConversionTask task, ComboBox presetCombo, Label lblFormat, Label lblResolution, Label lblSize)
         {
             using (var dlg = new PresetEditForm())
@@ -653,15 +685,20 @@ namespace VideoConverter
                 dlg.Preset = task.Preset;
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
-                    // Refresh dropdown display.
-                    int idx = presetCombo.SelectedIndex;
-                    presetCombo.DataSource = PresetOption.All.ToList();
-                    presetCombo.SelectedIndex = idx;
-                    lblFormat.Text = "格式: " + task.TargetFormat;
-                    lblResolution.Text = "分辨率: " + task.TargetResolution;
-                    lblSize.Text = "预计大小: " + EstimateTargetSizeFromTask(task);
+                    task.Preset = dlg.Preset;
+                    RefreshPresetCombo(presetCombo, task, lblFormat, lblResolution, lblSize);
                 }
             }
+        }
+
+        private void RefreshPresetCombo(ComboBox presetCombo, ConversionTask task, Label lblFormat, Label lblResolution, Label lblSize)
+        {
+            presetCombo.Items.Clear();
+            presetCombo.Items.Add(task.Preset);
+            presetCombo.SelectedItem = task.Preset;
+            lblFormat.Text = "格式: " + task.TargetFormat;
+            lblResolution.Text = "分辨率: " + task.TargetResolution;
+            lblSize.Text = "预计大小: " + EstimateTargetSizeFromTask(task);
         }
 
         #endregion
@@ -822,15 +859,30 @@ namespace VideoConverter
 
         private void ConvertToCombo_SelectedIndexChanged(object sender, EventArgs e)
         {
-            var preset = convertToCombo.SelectedItem as PresetOption;
-            if (preset == null) return;
+            var formatPreset = convertToCombo.SelectedItem as PresetOption;
+            if (formatPreset == null) return;
+
             foreach (var task in _tasks)
             {
-                task.Preset = preset;
+                // Try to keep the same preset "name" (e.g. 1080) within the new format;
+                // fall back to same-as-source, then the first preset of the format.
+                var newFormat = PresetDataStore.FindFormat(formatPreset.FormatId);
+                PresetOption newPreset = null;
+                if (newFormat != null && newFormat.Presets.Count > 0)
+                {
+                    newPreset = newFormat.Presets.FirstOrDefault(p => p.Name == task.Preset.Name)
+                                ?? newFormat.Presets.FirstOrDefault(p => p.KeepSource)
+                                ?? newFormat.Presets[0];
+                }
+                if (newPreset == null) newPreset = formatPreset;
+
+                task.Preset = newPreset;
                 var card = _cards.FirstOrDefault(c => c.Task == task);
                 if (card != null && card.PresetCombo != null)
                 {
-                    card.PresetCombo.SelectedItem = preset;
+                    card.PresetCombo.Items.Clear();
+                    card.PresetCombo.Items.Add(newPreset);
+                    card.PresetCombo.SelectedItem = newPreset;
                     card.OutputNameLabel.Text = task.GetOutputFileName();
                     card.TargetFormatLabel.Text = "格式: " + task.TargetFormat;
                     card.TargetResolutionLabel.Text = "分辨率: " + task.TargetResolution;
