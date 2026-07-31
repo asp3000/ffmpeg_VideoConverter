@@ -9,3 +9,6 @@ obj/
 
 # NuGet
 packages/
+
+# WorkBuddy 项目记忆（含本机路径，不入公开仓库；如需随仓库同步，删除此行即可）
+.workbuddy/
