@@ -243,6 +243,8 @@ namespace VideoConverter
                     info.VideoCodec = ExtractJsonValue(body, "codec_name");
                     if (int.TryParse(ExtractJsonValue(body, "width"), out int w)) info.Width = w;
                     if (int.TryParse(ExtractJsonValue(body, "height"), out int h)) info.Height = h;
+                    string fr = ExtractJsonValue(body, "r_frame_rate");
+                    if (!string.IsNullOrEmpty(fr)) info.FrameRate = ParseRational(fr);
                     if (info.DurationSeconds <= 0)
                     {
                         if (double.TryParse(ExtractJsonValue(body, "duration"), NumberStyles.Any, CultureInfo.InvariantCulture, out double vd))
@@ -519,6 +521,27 @@ namespace VideoConverter
             return 0;
         }
 
+        /// <summary>
+        /// Parse an ffprobe rational such as "30000/1001" or "25" into a double.
+        /// </summary>
+        private static double ParseRational(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return 0;
+            value = value.Trim();
+            int slash = value.IndexOf('/');
+            if (slash < 0)
+            {
+                if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out double v)) return v;
+                return 0;
+            }
+            string a = value.Substring(0, slash);
+            string b = value.Substring(slash + 1);
+            if (double.TryParse(a, NumberStyles.Any, CultureInfo.InvariantCulture, out double num) &&
+                double.TryParse(b, NumberStyles.Any, CultureInfo.InvariantCulture, out double den) && den != 0)
+                return num / den;
+            return 0;
+        }
+
         public static string FormatFileSize(long bytes)
         {
             if (bytes < 1024) return bytes + " B";
@@ -542,6 +565,7 @@ namespace VideoConverter
         public int Width { get; set; }
         public int Height { get; set; }
         public double DurationSeconds { get; set; }
+        public double FrameRate { get; set; }
         public long SizeBytes { get; set; }
         public List<AudioTrackInfo> AudioTracks { get; set; } = new List<AudioTrackInfo>();
         public List<SubtitleTrackInfo> SubtitleTracks { get; set; } = new List<SubtitleTrackInfo>();

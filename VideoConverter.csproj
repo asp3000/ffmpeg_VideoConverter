@@ -28,4 +28,15 @@
     </Content>
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="OpenTK" Version="3.3.3" />
+    <PackageReference Include="OpenTK.GLControl" Version="3.3.3" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- NAudio 2.x splits implementations into sub-packages; for a net472
+         project the WinMM (WaveOutEvent) and Core (BufferedWaveProvider)
+         netstandard2.0 assemblies must be referenced explicitly. -->
+    <PackageReference Include="NAudio.WinMM" Version="2.2.1" />
+    <PackageReference Include="NAudio.Core" Version="2.2.1" />
+  </ItemGroup>
+
 </Project>

@@ -95,7 +95,7 @@ namespace VideoConverter
             this.deleteButton.Name = "deleteButton";
             this.deleteButton.Size = new System.Drawing.Size(64, 32);
             this.deleteButton.TabIndex = 4;
-            this.deleteButton.Text = "删除";
+            this.deleteButton.Text = "清空";
             this.deleteButton.UseVisualStyleBackColor = false;
             this.deleteButton.Click += new System.EventHandler(this.DeleteButton_Click);
             // 

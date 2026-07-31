@@ -29,6 +29,11 @@ namespace VideoConverter
 
         private bool _batchConverting;
 
+        // The single currently-selected card (null when none selected). #42
+        private RoundedPanel _selectedCard;
+        // Pending hardware-encode preference, applied once HW detection completes. #47
+        private bool _pendingHardware;
+
         public VideoConverter()
         {
             InitializeComponent();
@@ -40,14 +45,19 @@ namespace VideoConverter
             }
             catch { }
 
-            // Load UniConverter preset database.
-            PresetDataStore.Load();
+            // Load UniConverter preset database once (idempotent global cache). #43
+            PresetDataStore.EnsureLoaded();
             if (!PresetDataStore.IsLoaded && PresetDataStore.LoadException != null)
             {
                 MessageBox.Show(this,
                     "预设数据加载失败，将使用内置预设。\n错误：" + PresetDataStore.LoadException.Message,
                     "预设加载提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
+
+            // Restore persisted check-box state (高速转换 / 硬件编码). #47
+            AppSettings.Load();
+            highSpeedCheck.Checked = AppSettings.HighSpeed;
+            _pendingHardware = AppSettings.Hardware;
 
             // Allow dropping files anywhere on the window / list.
             this.AllowDrop = true;
@@ -251,16 +261,18 @@ namespace VideoConverter
 
         private void DeleteButton_Click(object sender, EventArgs e)
         {
-            // Remove selected/completed tasks depending on active tab.
-            var toRemove = _showCompleted
-                ? _tasks.Where(t => t.Status == TaskStatus.Completed).ToList()
-                : _tasks.Where(t => t.Status != TaskStatus.Converting).ToList();
+            // "清空" — remove every queued file (with a safety confirmation). #51
+            if (_tasks.Count == 0) return;
+            if (MessageBox.Show(this, "确定要清空当前列表中的所有文件吗？", "清空确认",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
 
-            foreach (var t in toRemove)
+            foreach (var t in _tasks)
             {
-                _tasks.Remove(t);
                 if (t.Thumbnail != null) t.Thumbnail.Dispose();
             }
+            _tasks.Clear();
+            _selectedCard = null;
             RefreshTaskList();
         }
 
@@ -276,6 +288,7 @@ namespace VideoConverter
                 card.Panel.Dispose();
             }
             _cards.Clear();
+            _selectedCard = null;
             taskListPanel.Controls.Clear();
 
             var visible = _showCompleted
@@ -317,19 +330,43 @@ namespace VideoConverter
             };
             cardPanel.Controls.Add(thumb);
 
-            // Play overlay.
+            // Play overlay — hidden until the thumbnail is hovered, then shown
+            // centered over the preview. Clicking it (or the thumbnail) opens
+            // the OpenGL preview window. #50
             var playOverlay = new Label
             {
-                Location = new Point(thumb.Left + 55, thumb.Top + 27),
-                Size = new Size(40, 30),
-                BackColor = Color.Transparent,
+                Location = new Point(thumb.Left + 55, thumb.Top + 22),
+                Size = new Size(40, 40),
+                BackColor = Color.FromArgb(124, 77, 255),
                 Text = "▶",
-                Font = new Font("Microsoft YaHei UI", 14F, FontStyle.Regular),
+                Font = new Font("Microsoft YaHei UI", 16F, FontStyle.Regular),
                 ForeColor = Color.White,
-                TextAlign = ContentAlignment.MiddleCenter
+                TextAlign = ContentAlignment.MiddleCenter,
+                Visible = false
             };
             cardPanel.Controls.Add(playOverlay);
             playOverlay.BringToFront();
+
+            // Preview behaviour: show the play button on hover, open the OpenGL
+            // preview window on click. #50
+            void ShowOverlay(bool show)
+            {
+                if (!playOverlay.IsDisposed) playOverlay.Visible = show;
+            }
+            thumb.MouseEnter += (s, e) => ShowOverlay(true);
+            thumb.MouseLeave += (s, e) => ShowOverlay(false);
+            thumb.Click += (s, e) =>
+            {
+                SelectCard(cardPanel);
+                OpenPlayer(task);
+            };
+            playOverlay.MouseEnter += (s, e) => ShowOverlay(true);
+            playOverlay.MouseLeave += (s, e) => ShowOverlay(false);
+            playOverlay.Click += (s, e) =>
+            {
+                SelectCard(cardPanel);
+                OpenPlayer(task);
+            };
 
             // ---- Input column ----
             int inputX = 174;
@@ -353,13 +390,14 @@ namespace VideoConverter
             toolTip.SetToolTip(lblInName, inFileName);
             cardPanel.Controls.Add(lblInName);
 
-            AddInfoLabel(cardPanel, inputX, row2Y, "格式: " + task.SourceFormat, 110);
-            AddInfoLabel(cardPanel, inputX + 110, row2Y, "分辨率: " + task.SourceResolution, 110);
-            AddInfoLabel(cardPanel, inputX, row3Y, "大小: " + task.SourceFileSize, 110);
-            AddInfoLabel(cardPanel, inputX + 110, row3Y, "时长: " + task.SourceDuration, 110);
+            var lblInFormat = AddInfoLabel(cardPanel, inputX, row2Y, "格式: " + task.SourceFormat, 110);
+            var lblInResolution = AddInfoLabel(cardPanel, inputX + 110, row2Y, "分辨率: " + task.SourceResolution, 110);
+            var lblInSize = AddInfoLabel(cardPanel, inputX, row3Y, "大小: " + task.SourceFileSize, 110);
+            var lblInDuration = AddInfoLabel(cardPanel, inputX + 110, row3Y, "时长: " + task.SourceDuration, 110);
 
-            // Edit icon on input row 4.
-            var btnEditVideo = CreateIconButton("✎", inputX, row4Y, "视频编辑");
+            // Edit icon on input row 4 -> themed button (light fill, dark text,
+            // dark border). #48
+            var btnEditVideo = CreateThemeButton("✎", inputX, row4Y, "视频编辑");
             btnEditVideo.Click += (s, e) => OpenVideoEdit(task);
             cardPanel.Controls.Add(btnEditVideo);
 
@@ -394,7 +432,7 @@ namespace VideoConverter
             cardPanel.Controls.Add(txtOutName);
 
             Button btnEditName = null;
-            btnEditName = CreateIconButton("✎", outputX + outputW - 54, row1Y - 2, "修改文件名");
+            btnEditName = CreateThemeButton("✎", outputX + outputW - 54, row1Y - 2, "修改文件名");
             btnEditName.Click += (s, e) =>
             {
                 if (txtOutName.Visible)
@@ -450,24 +488,45 @@ namespace VideoConverter
             var lblOutSize = AddInfoLabel(cardPanel, outputX, row3Y, "预计大小: " + (task.EstimatedTargetSize ?? "-"), 130);
             var lblOutDuration = AddInfoLabel(cardPanel, outputX + 130, row3Y, "输出时长: " + task.TargetDuration, 130);
 
-            // Row 4: preset dropdown + gear + subtitle + audio.
+            // Row 4: preset selector (white bordered panel, styled like the
+            // bottom "转换到" control) + subtitle + audio. #45
             int r4x = outputX;
-            var cmbPreset = CreateDropDown(r4x, row4Y, 140);
-            cmbPreset.DisplayMember = "Name";
-            cmbPreset.ValueMember = "Name";
-            cmbPreset.Items.Add(task.Preset);
-            cmbPreset.SelectedItem = task.Preset;
-            // Intercept the dropdown arrow click and show the full preset selector.
-            cmbPreset.DropDown += (s, e) =>
+            var presetPanel = new Panel
             {
-                cmbPreset.DroppedDown = false;
-                OpenPresetSelection(task, cmbPreset, lblOutFormat, lblOutResolution, lblOutSize);
+                Location = new Point(r4x, row4Y - 1),
+                Size = new Size(168, 26),
+                BackColor = Color.White,
+                BorderStyle = BorderStyle.FixedSingle
             };
-            cardPanel.Controls.Add(cmbPreset);
-
-            var btnPresetSettings = CreateIconButton("⚙", r4x + 144, row4Y - 1, "预设编辑");
-            btnPresetSettings.Click += (s, e) => OpenPresetEdit(task, cmbPreset, lblOutFormat, lblOutResolution, lblOutSize);
-            cardPanel.Controls.Add(btnPresetSettings);
+            var btnPreset = new Button
+            {
+                Dock = DockStyle.Fill,
+                FlatStyle = FlatStyle.Flat,
+                Text = task.Preset.Name,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Regular),
+                BackColor = Color.White,
+                ForeColor = Color.FromArgb(45, 45, 45),
+                UseVisualStyleBackColor = false
+            };
+            btnPreset.FlatAppearance.BorderSize = 0;
+            var btnPresetGear = new Button
+            {
+                Dock = DockStyle.Right,
+                FlatStyle = FlatStyle.Flat,
+                Text = "⚙",
+                Size = new Size(26, 26),
+                Font = new Font("Microsoft YaHei UI", 10F),
+                BackColor = Color.White,
+                ForeColor = Color.FromArgb(45, 45, 45),
+                UseVisualStyleBackColor = false
+            };
+            btnPresetGear.FlatAppearance.BorderSize = 0;
+            btnPreset.Click += (s, e) => OpenPresetSelection(task, btnPreset, lblOutFormat, lblOutResolution, lblOutSize);
+            btnPresetGear.Click += (s, e) => OpenPresetEdit(task, btnPreset, lblOutFormat, lblOutResolution, lblOutSize);
+            presetPanel.Controls.Add(btnPreset);
+            presetPanel.Controls.Add(btnPresetGear);
+            cardPanel.Controls.Add(presetPanel);
 
             var cmbSubtitle = CreateDropDown(r4x + 150, row4Y, 110);
             cmbSubtitle.Items.Add("无字幕");
@@ -538,7 +597,7 @@ namespace VideoConverter
             {
                 Task = task,
                 Panel = cardPanel,
-                PresetCombo = cmbPreset,
+                PresetButton = btnPreset,
                 SubtitleCombo = cmbSubtitle,
                 AudioCombo = cmbAudio,
                 ConvertButton = btnConvert,
@@ -546,6 +605,10 @@ namespace VideoConverter
                 StatusLabel = lblStatus,
                 OutputNameLabel = lblOutName,
                 OutputNameEdit = txtOutName,
+                SourceFormatLabel = lblInFormat,
+                SourceResolutionLabel = lblInResolution,
+                SourceSizeLabel = lblInSize,
+                SourceDurationLabel = lblInDuration,
                 TargetFormatLabel = lblOutFormat,
                 TargetResolutionLabel = lblOutResolution,
                 TargetSizeLabel = lblOutSize,
@@ -577,11 +640,7 @@ namespace VideoConverter
                     cardPanel.Invalidate();
                 }
             };
-            cardPanel.Click += (s, e) =>
-            {
-                cardPanel.IsActive = !cardPanel.IsActive;
-                cardPanel.Invalidate();
-            };
+            cardPanel.Click += (s, e) => SelectCard(cardPanel);
 
             foreach (Control c in cardPanel.Controls)
             {
@@ -600,13 +659,29 @@ namespace VideoConverter
                 };
                 c.Click += (s, e) =>
                 {
-                    // Buttons/combos have their own click logic; do not toggle active state for them.
+                    // Buttons/combos have their own click logic; do not change
+                    // the selection state for them. Everything else selects the card.
                     if (c is Button || c is ComboBox || c is TextBox || c is ProgressBar)
                         return;
-                    cardPanel.IsActive = !cardPanel.IsActive;
-                    cardPanel.Invalidate();
+                    SelectCard(cardPanel);
                 };
             }
+        }
+
+        /// <summary>
+        /// Select a single card. Only one card may be "active" at a time. #42
+        /// </summary>
+        private void SelectCard(RoundedPanel panel)
+        {
+            if (_selectedCard == panel) return;
+            if (_selectedCard != null && !_selectedCard.IsDisposed)
+            {
+                _selectedCard.IsActive = false;
+                _selectedCard.Invalidate();
+            }
+            _selectedCard = panel;
+            panel.IsActive = true;
+            panel.Invalidate();
         }
 
         private Label AddInfoLabel(Panel parent, int x, int y, string text, int width)
@@ -638,6 +713,27 @@ namespace VideoConverter
                 Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular)
             };
             btn.FlatAppearance.BorderSize = 0;
+            toolTip.SetToolTip(btn, tooltip);
+            return btn;
+        }
+
+        /// <summary>
+        /// Themed action button: light fill, dark text, dark (theme) border. #48
+        /// </summary>
+        private Button CreateThemeButton(string text, int x, int y, string tooltip)
+        {
+            var btn = new Button
+            {
+                Location = new Point(x, y),
+                Size = new Size(30, 26),
+                Text = text,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(237, 232, 248),
+                ForeColor = Color.FromArgb(45, 45, 45),
+                Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular)
+            };
+            btn.FlatAppearance.BorderColor = Color.FromArgb(124, 77, 255);
+            btn.FlatAppearance.BorderSize = 1;
             toolTip.SetToolTip(btn, tooltip);
             return btn;
         }
@@ -706,6 +802,22 @@ namespace VideoConverter
             }
         }
 
+        private void OpenPlayer(ConversionTask task)
+        {
+            try
+            {
+                var ext = Path.GetExtension(task.InputPath).ToLowerInvariant();
+                bool isImage = new[] { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp" }.Contains(ext);
+                var dlg = new VideoPlayerForm(task.InputPath, isImage);
+                dlg.Show(this);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "无法打开预览：\n" + ex.Message, "预览",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
         private void OpenVideoEdit(ConversionTask task)
         {
             using (var dlg = new VideoEditForm())
@@ -727,19 +839,19 @@ namespace VideoConverter
             }
         }
 
-        private void OpenPresetSelection(ConversionTask task, ComboBox presetCombo, Label lblFormat, Label lblResolution, Label lblSize)
+        private void OpenPresetSelection(ConversionTask task, Button presetButton, Label lblFormat, Label lblResolution, Label lblSize)
         {
             using (var dlg = new PresetSelectionForm())
             {
                 if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedPreset != null)
                 {
                     task.Preset = dlg.SelectedPreset;
-                    RefreshPresetCombo(presetCombo, task, lblFormat, lblResolution, lblSize);
+                    RefreshPresetButton(presetButton, task, lblFormat, lblResolution, lblSize);
                 }
             }
         }
 
-        private void OpenPresetEdit(ConversionTask task, ComboBox presetCombo, Label lblFormat, Label lblResolution, Label lblSize)
+        private void OpenPresetEdit(ConversionTask task, Button presetButton, Label lblFormat, Label lblResolution, Label lblSize)
         {
             using (var dlg = new PresetEditForm())
             {
@@ -747,19 +859,21 @@ namespace VideoConverter
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     task.Preset = dlg.Preset;
-                    RefreshPresetCombo(presetCombo, task, lblFormat, lblResolution, lblSize);
+                    RefreshPresetButton(presetButton, task, lblFormat, lblResolution, lblSize);
                 }
             }
         }
 
-        private void RefreshPresetCombo(ComboBox presetCombo, ConversionTask task, Label lblFormat, Label lblResolution, Label lblSize)
+        private void RefreshPresetButton(Button presetButton, ConversionTask task, Label lblFormat, Label lblResolution, Label lblSize)
         {
-            presetCombo.Items.Clear();
-            presetCombo.Items.Add(task.Preset);
-            presetCombo.SelectedItem = task.Preset;
+            if (presetButton != null && !presetButton.IsDisposed)
+                presetButton.Text = task.Preset.Name;
             lblFormat.Text = "格式: " + task.TargetFormat;
             lblResolution.Text = "分辨率: " + task.TargetResolution;
             lblSize.Text = "预计大小: " + EstimateTargetSizeFromTask(task);
+            var card = _cards.FirstOrDefault(c => c.Task == task);
+            if (card != null && card.TargetDurationLabel != null && !card.TargetDurationLabel.IsDisposed)
+                card.TargetDurationLabel.Text = "输出时长: " + task.TargetDuration;
         }
 
         #endregion
@@ -801,11 +915,15 @@ namespace VideoConverter
         private void HighSpeedCheck_CheckedChanged(object sender, EventArgs e)
         {
             ApplyCheckStyle(highSpeedCheck);
+            AppSettings.HighSpeed = highSpeedCheck.Checked;
+            AppSettings.Save();
         }
 
         private void HardwareCheck_CheckedChanged(object sender, EventArgs e)
         {
             ApplyCheckStyle(hardwareCheck);
+            AppSettings.Hardware = hardwareCheck.Checked;
+            AppSettings.Save();
         }
 
         /// <summary>
@@ -839,6 +957,8 @@ namespace VideoConverter
                     hardwareCheck.Checked = false;
                     hardwareCheck.Text = result.Ok ? "硬件编码 (不支持)" : "硬件编码 (检测失败)";
                 }
+                // Apply persisted hardware-encode preference when supported. #47
+                if (hardwareCheck.Enabled) hardwareCheck.Checked = _pendingHardware;
                 ApplyCheckStyle(hardwareCheck);
             }));
         }
@@ -918,7 +1038,7 @@ namespace VideoConverter
             convertingCountLabel.Text = string.Format("({0})", count);
         }
 
-        private void ConvertToButton_Click(object sender, EventArgs e)
+        private async void ConvertToButton_Click(object sender, EventArgs e)
         {
             using (var dlg = new PresetSelectionForm())
             {
@@ -926,12 +1046,12 @@ namespace VideoConverter
                 {
                     _globalPreset = dlg.SelectedPreset;
                     UpdateConvertToDisplay();
-                    ApplyGlobalPresetToAll();
+                    await ApplyGlobalPresetToAll();
                 }
             }
         }
 
-        private void ConvertToGearButton_Click(object sender, EventArgs e)
+        private async void ConvertToGearButton_Click(object sender, EventArgs e)
         {
             using (var dlg = new PresetEditForm())
             {
@@ -940,12 +1060,12 @@ namespace VideoConverter
                 {
                     _globalPreset = dlg.Preset;
                     UpdateConvertToDisplay();
-                    ApplyGlobalPresetToAll();
+                    await ApplyGlobalPresetToAll();
                 }
             }
         }
 
-        private void ApplyGlobalPresetToAll()
+        private async Task ApplyGlobalPresetToAll()
         {
             if (_globalPreset == null) return;
 
@@ -965,16 +1085,54 @@ namespace VideoConverter
 
                 task.Preset = newPreset.Clone();
                 var card = _cards.FirstOrDefault(c => c.Task == task);
-                if (card != null && card.PresetCombo != null)
+                if (card != null)
                 {
-                    card.PresetCombo.Items.Clear();
-                    card.PresetCombo.Items.Add(task.Preset);
-                    card.PresetCombo.SelectedItem = task.Preset;
+                    if (card.PresetButton != null && !card.PresetButton.IsDisposed)
+                        card.PresetButton.Text = task.Preset.Name;
                     card.OutputNameLabel.Text = task.GetOutputFileName();
                     card.TargetFormatLabel.Text = "格式: " + task.TargetFormat;
                     card.TargetResolutionLabel.Text = "分辨率: " + task.TargetResolution;
-                    card.TargetSizeLabel.Text = "预计大小: " + EstimateTargetSizeFromTask(task);
                 }
+
+                // Re-probe source metadata via ffprobe and recompute the output
+                // duration/size. #44 / #46
+                await RefreshCardMetadata(task);
+            }
+        }
+
+        /// <summary>
+        /// Re-read a task's source resolution/duration with ffprobe and refresh
+        /// the relevant card labels (source + output duration/size). #44 / #46
+        /// </summary>
+        private async Task RefreshCardMetadata(ConversionTask task)
+        {
+            var card = _cards.FirstOrDefault(c => c.Task == task);
+            try
+            {
+                var info = await FFmpegHelper.ProbeDetailedAsync(task.InputPath);
+                if (info.Width > 0 && info.Height > 0)
+                    task.SourceResolution = string.Format("{0} x {1}", info.Width, info.Height);
+                if (info.DurationSeconds > 0)
+                {
+                    task.SourceDurationSeconds = info.DurationSeconds;
+                    task.SourceDuration = FFmpegHelper.FormatDuration(info.DurationSeconds);
+                }
+                if (card != null)
+                {
+                    if (card.SourceResolutionLabel != null && !card.SourceResolutionLabel.IsDisposed)
+                        card.SourceResolutionLabel.Text = "分辨率: " + task.SourceResolution;
+                    if (card.SourceDurationLabel != null && !card.SourceDurationLabel.IsDisposed)
+                        card.SourceDurationLabel.Text = "时长: " + task.SourceDuration;
+                }
+            }
+            catch { /* keep existing metadata on probe failure */ }
+
+            if (card != null)
+            {
+                if (card.TargetDurationLabel != null && !card.TargetDurationLabel.IsDisposed)
+                    card.TargetDurationLabel.Text = "输出时长: " + task.TargetDuration;
+                if (card.TargetSizeLabel != null && !card.TargetSizeLabel.IsDisposed)
+                    card.TargetSizeLabel.Text = "预计大小: " + EstimateTargetSizeFromTask(task);
             }
         }
 
@@ -1130,7 +1288,7 @@ namespace VideoConverter
         {
             public ConversionTask Task { get; set; }
             public RoundedPanel Panel { get; set; }
-            public ComboBox PresetCombo { get; set; }
+            public Button PresetButton { get; set; }
             public ComboBox SubtitleCombo { get; set; }
             public ComboBox AudioCombo { get; set; }
             public Button ConvertButton { get; set; }
@@ -1138,6 +1296,10 @@ namespace VideoConverter
             public Label StatusLabel { get; set; }
             public Label OutputNameLabel { get; set; }
             public TextBox OutputNameEdit { get; set; }
+            public Label SourceFormatLabel { get; set; }
+            public Label SourceResolutionLabel { get; set; }
+            public Label SourceSizeLabel { get; set; }
+            public Label SourceDurationLabel { get; set; }
             public Label TargetFormatLabel { get; set; }
             public Label TargetResolutionLabel { get; set; }
             public Label TargetSizeLabel { get; set; }

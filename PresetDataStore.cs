@@ -67,6 +67,17 @@ namespace VideoConverter
         /// <summary>True when at least one category was loaded.</summary>
         public static bool IsLoaded => Categories.Count > 0;
 
+        /// <summary>
+        /// Idempotent wrapper around <see cref="Load"/>. Safe to call from
+        /// anywhere; the preset database is parsed once and then held in this
+        /// static object for the lifetime of the process. #43
+        /// </summary>
+        public static void EnsureLoaded()
+        {
+            if (IsLoaded) return;
+            Load();
+        }
+
         /// <summary>Recently selected presets (max 20).</summary>
         public static List<PresetOption> RecentPresets { get; private set; } = new List<PresetOption>();
 
