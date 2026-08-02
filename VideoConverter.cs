@@ -82,17 +82,49 @@ namespace VideoConverter
         #region Setup
 
         private PresetOption _globalPreset;
+        private bool _suppressSaveToEvent;
+        private int _lastSaveToIndex;
 
         private void SetupPresets()
         {
-            // Default global preset: MP4 1080 from the store if available, otherwise built-in.
-            _globalPreset = FindPresetByName("MP4", "1080")
+            // Restore the last chosen "转换到" preset from settings if possible.
+            _globalPreset = RestoreSavedPreset()
+                ?? FindPresetByName("MP4", "1080")
                 ?? FindPresetByName("MP4", "与源文件相同")
                 ?? PresetOption.BuiltInAll.FirstOrDefault(p =>
                     string.Equals(p.FormatName, "MP4", StringComparison.OrdinalIgnoreCase))
                 ?? PresetOption.MP4_1080;
 
             UpdateConvertToDisplay();
+        }
+
+        /// <summary>按上次保存的 FormatId + Name 恢复「转换到」预设；找不到返回 null。</summary>
+        private PresetOption RestoreSavedPreset()
+        {
+            try
+            {
+                string fmtId = AppSettings.ConvertToFormatId;
+                string name = AppSettings.ConvertToPresetName;
+                if (string.IsNullOrWhiteSpace(name)) return null;
+
+                PresetOption found = null;
+                if (!string.IsNullOrWhiteSpace(fmtId))
+                {
+                    var fmt = PresetDataStore.FindFormat(fmtId);
+                    if (fmt != null)
+                        found = fmt.Presets.FirstOrDefault(p =>
+                            string.Equals(p.Name, name, StringComparison.Ordinal));
+                    if (found == null)
+                        found = PresetDataStore.CustomPresets.FirstOrDefault(p =>
+                            string.Equals(p.Name, name, StringComparison.Ordinal) &&
+                            string.Equals(p.FormatId, fmtId, StringComparison.Ordinal));
+                }
+                if (found == null)
+                    found = PresetDataStore.CustomPresets.FirstOrDefault(p =>
+                        string.Equals(p.Name, name, StringComparison.Ordinal));
+                return found != null ? found.Clone() : null;
+            }
+            catch { return null; }
         }
 
         private PresetOption FindPresetByName(string formatName, string presetNameHint)
@@ -121,9 +153,95 @@ namespace VideoConverter
 
         private void SetupSaveTo()
         {
+            saveToCombo.Items.Clear();
             saveToCombo.Items.Add("与源文件夹相同");
+            if (AppSettings.SaveToFolders != null)
+            {
+                foreach (var dir in AppSettings.SaveToFolders)
+                {
+                    if (!string.IsNullOrWhiteSpace(dir) && !saveToCombo.Items.Contains(dir))
+                        saveToCombo.Items.Add(dir);
+                }
+            }
             saveToCombo.Items.Add("选择文件夹...");
-            saveToCombo.SelectedIndex = 0;
+
+            saveToCombo.SelectedIndexChanged += SaveToCombo_SelectedIndexChanged;
+
+            // Restore the last chosen "保存到" value.
+            _suppressSaveToEvent = true;
+            int idx = string.IsNullOrEmpty(AppSettings.SaveToValue)
+                ? -1
+                : saveToCombo.Items.IndexOf(AppSettings.SaveToValue);
+            saveToCombo.SelectedIndex = idx >= 0 ? idx : 0;
+            _suppressSaveToEvent = false;
+            _lastSaveToIndex = saveToCombo.SelectedIndex;
+        }
+
+        /// <summary>
+        /// "选择文件夹..." triggers a folder picker; the chosen directory is
+        /// appended to the dropdown items and persisted to settings.
+        /// </summary>
+        private void SaveToCombo_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (_suppressSaveToEvent) return;
+            string sel = saveToCombo.SelectedItem as string;
+            if (string.Equals(sel, "选择文件夹...", StringComparison.Ordinal))
+            {
+                int fallback = _lastSaveToIndex >= 0 ? _lastSaveToIndex : 0;
+                using (var fbd = new FolderBrowserDialog())
+                {
+                    fbd.Description = "选择输出文件夹";
+                    if (fbd.ShowDialog(this) == DialogResult.OK && !string.IsNullOrWhiteSpace(fbd.SelectedPath))
+                    {
+                        string dir = fbd.SelectedPath;
+                        _suppressSaveToEvent = true;
+                        if (!saveToCombo.Items.Contains(dir))
+                            saveToCombo.Items.Insert(saveToCombo.Items.Count - 1, dir);
+                        saveToCombo.SelectedItem = dir;
+                        _suppressSaveToEvent = false;
+                        if (!AppSettings.SaveToFolders.Contains(dir))
+                            AppSettings.SaveToFolders.Add(dir);
+                        PersistSaveTo();
+                    }
+                    else
+                    {
+                        // Cancel: revert to the previously selected item.
+                        _suppressSaveToEvent = true;
+                        saveToCombo.SelectedIndex = fallback;
+                        _suppressSaveToEvent = false;
+                    }
+                }
+            }
+            else
+            {
+                PersistSaveTo();
+            }
+            _lastSaveToIndex = saveToCombo.SelectedIndex;
+        }
+
+        private void PersistSaveTo()
+        {
+            AppSettings.SaveToValue = saveToCombo.SelectedItem as string;
+            AppSettings.Save();
+        }
+
+        private void PersistConvertToPreset()
+        {
+            if (_globalPreset == null) return;
+            AppSettings.ConvertToFormatId = _globalPreset.FormatId;
+            AppSettings.ConvertToPresetName = _globalPreset.Name;
+            AppSettings.Save();
+        }
+
+        /// <summary>当前「保存到」选中的实际目录；"与源文件夹相同" 或占位项返回 null。</summary>
+        private string GetSelectedSaveToFolder()
+        {
+            string sel = saveToCombo.SelectedItem as string;
+            if (string.IsNullOrEmpty(sel) ||
+                string.Equals(sel, "与源文件夹相同", StringComparison.Ordinal) ||
+                string.Equals(sel, "选择文件夹...", StringComparison.Ordinal))
+                return null;
+            return sel;
         }
 
         #endregion
@@ -155,7 +273,8 @@ namespace VideoConverter
                 var task = new ConversionTask
                 {
                     InputPath = file,
-                    Preset = preset
+                    Preset = preset,
+                    SaveToFolder = GetSelectedSaveToFolder()
                 };
 
                 // Try to read source metadata with ffprobe.
@@ -1061,6 +1180,7 @@ namespace VideoConverter
                 if (dlg.ShowDialog(this) == DialogResult.OK && dlg.SelectedPreset != null)
                 {
                     _globalPreset = dlg.SelectedPreset;
+                    PersistConvertToPreset();
                     UpdateConvertToDisplay();
                     await ApplyGlobalPresetToAll();
                 }
@@ -1076,6 +1196,7 @@ namespace VideoConverter
                 {
                     _globalPreset = dlg.Preset;
                     RegisterCustomIfNeeded(dlg.Preset);
+                    PersistConvertToPreset();
                     UpdateConvertToDisplay();
                     await ApplyGlobalPresetToAll();
                 }
