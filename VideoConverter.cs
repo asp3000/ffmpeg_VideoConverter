@@ -1374,6 +1374,10 @@ namespace VideoConverter
             if (card == null) return;
             if (task.Status == TaskStatus.Converting) return;
 
+            // 转换前检测输入是否为 VC-1（WMV），是则注入容错参数。#74
+            try { task.IsVC1Input = await FFmpegHelper.DetectVC1InputAsync(task.InputPath); }
+            catch { task.IsVC1Input = false; }
+
             // Decide per-task conversion mode.
             task.UseStreamCopy = AppliesStreamCopy(task);
             task.HardwareEncoder = GetHardwareEncoderFor(task);

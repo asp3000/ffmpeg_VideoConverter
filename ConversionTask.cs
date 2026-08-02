@@ -49,6 +49,12 @@ namespace VideoConverter
 
         public string SaveToFolder { get; set; }
 
+        /// <summary>
+        /// 输入视频是否为 VC-1（WMV：vc1/wmv3/wvc1）。为 true 时 ffmpeg 命令注入
+        /// 容错参数（-fflags +discardcorrupt -err_detect ignore_err -threads 1）。#74
+        /// </summary>
+        public bool IsVC1Input { get; set; }
+
         // ---- source metadata ------------------------------------------------
         public string SourceFormat { get; set; }
         public string SourceResolution { get; set; }

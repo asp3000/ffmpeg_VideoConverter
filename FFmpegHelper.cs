@@ -259,6 +259,32 @@ namespace VideoConverter
         }
 
         /// <summary>
+        /// 判断 ffprobe 的 codec_name 是否为 VC-1 家族（WMV 常见：vc1/wmv3/wvc1）。
+        /// </summary>
+        public static bool IsVC1Codec(string codecName)
+        {
+            if (string.IsNullOrWhiteSpace(codecName)) return false;
+            string c = codecName.Trim().ToLowerInvariant();
+            return c == "vc1" || c == "wmv3" || c == "wvc1";
+        }
+
+        /// <summary>
+        /// 用 ffprobe 检测输入文件的视频流是否为 VC-1。探测失败返回 false。
+        /// </summary>
+        public static async Task<bool> DetectVC1InputAsync(string filePath)
+        {
+            try
+            {
+                var info = await ProbeDetailedAsync(filePath).ConfigureAwait(false);
+                return IsVC1Codec(info?.VideoCodec);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Minimal JSON parser for ffprobe -of json output. Avoids adding an
         /// external JSON dependency to the net472 project.
         /// </summary>
@@ -659,6 +685,10 @@ namespace VideoConverter
             // Trim: apply -ss before input for fast seek, -t after input for accurate duration.
             if (startSec > 0)
                 sb.AppendFormat(CultureInfo.InvariantCulture, " -ss {0:0.000}", startSec);
+
+            // VC-1 (WMV) 容错：vc1 native 解码器多线程不稳且易遇损坏包，注入输入侧容错参数。
+            if (task.IsVC1Input)
+                sb.Append(" -fflags +discardcorrupt -err_detect ignore_err -threads 1");
 
             sb.AppendFormat(" -i \"{0}\"", task.InputPath);
 
