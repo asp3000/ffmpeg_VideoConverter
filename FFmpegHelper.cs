@@ -489,6 +489,147 @@ namespace VideoConverter
             }
         }
 
+        #region Bitrate control (CBR / VBR / quality)
+
+        /// <summary>视频码率模式：自动 / 固定码率(CBR) / 可变码率(VBR) / 质量控制(CRF/QP)。</summary>
+        public enum BitrateMode { Auto, CBR, VBR, Quality }
+
+        public static string BitrateModeLabel(BitrateMode m)
+        {
+            switch (m)
+            {
+                case BitrateMode.CBR: return "固定码率";
+                case BitrateMode.VBR: return "可变码率";
+                case BitrateMode.Quality: return "质量控制";
+                default: return "自动";
+            }
+        }
+
+        public static BitrateMode ParseBitrateMode(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return BitrateMode.Auto;
+            if (string.Equals(s, "cbr", StringComparison.OrdinalIgnoreCase)) return BitrateMode.CBR;
+            if (string.Equals(s, "vbr", StringComparison.OrdinalIgnoreCase)) return BitrateMode.VBR;
+            if (string.Equals(s, "quality", StringComparison.OrdinalIgnoreCase)) return BitrateMode.Quality;
+            return BitrateMode.Auto;
+        }
+
+        /// <summary>质量控制参数规范：参数名 + 取值范围 + 推荐值。</summary>
+        public class QualitySpec
+        {
+            public string Param;
+            public int Min;
+            public int Max;
+            public int Recommended;
+
+            public override string ToString()
+            {
+                return string.Format("{0}~{1}，推荐 {2}", Min, Max, Recommended);
+            }
+        }
+
+        /// <summary>
+        /// 按实际 ffmpeg 编码器名返回质量控制参数规范（-crf / -qp / -cq / -global_quality / -q:v）。
+        /// 前缀匹配保证 CPU/GPU 解析后的编码器（如 libx264、h264_nvenc、hevc_qsv）都能命中；
+        /// 不支持的编码器返回 null（界面不提供质量控制选项）。
+        /// </summary>
+        public static QualitySpec GetQualitySpec(string encoder)
+        {
+            if (string.IsNullOrEmpty(encoder)) return null;
+            string e = encoder.ToLowerInvariant();
+            if (e.Contains("x264")) return new QualitySpec { Param = "-crf", Min = 0, Max = 51, Recommended = 23 };
+            if (e.Contains("x265")) return new QualitySpec { Param = "-crf", Min = 0, Max = 51, Recommended = 28 };
+            if (e.Contains("nvenc"))
+            {
+                if (e.Contains("av1")) return new QualitySpec { Param = "-cq", Min = 0, Max = 63, Recommended = 32 };
+                if (e.Contains("hevc")) return new QualitySpec { Param = "-cq", Min = 0, Max = 51, Recommended = 28 };
+                return new QualitySpec { Param = "-cq", Min = 0, Max = 51, Recommended = 23 };
+            }
+            if (e.Contains("qsv"))
+            {
+                if (e.Contains("hevc")) return new QualitySpec { Param = "-global_quality", Min = 1, Max = 51, Recommended = 28 };
+                return new QualitySpec { Param = "-global_quality", Min = 1, Max = 51, Recommended = 23 };
+            }
+            if (e.Contains("amf"))
+            {
+                if (e.Contains("hevc")) return new QualitySpec { Param = "-qp", Min = 0, Max = 51, Recommended = 28 };
+                return new QualitySpec { Param = "-qp", Min = 0, Max = 51, Recommended = 23 };
+            }
+            if (e.Contains("vpx")) return new QualitySpec { Param = "-crf", Min = 0, Max = 63, Recommended = 31 };
+            if (e.Contains("aom") || e.Contains("svtav1")) return new QualitySpec { Param = "-crf", Min = 0, Max = 63, Recommended = 32 };
+            if (e.Contains("xvid") || e.Contains("mpeg4") || e.Contains("mpeg2") || e.Contains("h263") ||
+                e.Contains("mjpeg") || e.Contains("wmv") || e.Contains("msmpeg"))
+                return new QualitySpec { Param = "-q:v", Min = 1, Max = 31, Recommended = 5 };
+            if (e.Contains("prores")) return new QualitySpec { Param = "-q:v", Min = 1, Max = 63, Recommended = 10 };
+            if (e.Contains("ffv1")) return new QualitySpec { Param = "-q:v", Min = 1, Max = 31, Recommended = 5 };
+            return null;
+        }
+
+        /// <summary>是否支持目标码率（固定/可变）控制。copy 流复制不支持。</summary>
+        public static bool SupportsTargetBitrate(string encoder)
+        {
+            return !string.IsNullOrEmpty(encoder) &&
+                   !string.Equals(encoder, "copy", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 按码率模式把码率/质量控制参数追加到命令行：
+        ///   CBR     → -b:v X -maxrate X -bufsize 2X
+        ///   VBR     → -b:v X
+        ///   Quality → -(crf|qp|cq|global_quality|q:v) V，可选 -maxrate M -bufsize 2M（受限质量控制）
+        ///   Auto    → 兼容旧行为：有码率就 -b:v X
+        /// </summary>
+        public static void AppendVideoBitrate(StringBuilder sb, PresetOption p, string encoder)
+        {
+            if (p == null) return;
+            BitrateMode mode = ParseBitrateMode(p.BitrateMode);
+            string bitrate = p.VideoBitrate;
+            switch (mode)
+            {
+                case BitrateMode.CBR:
+                    if (!string.IsNullOrEmpty(bitrate) && SupportsTargetBitrate(encoder))
+                    {
+                        sb.AppendFormat(" -b:v {0}", bitrate);
+                        sb.AppendFormat(" -maxrate {0}", bitrate);
+                        sb.AppendFormat(" -bufsize {0}", DoubleBitrate(bitrate));
+                    }
+                    break;
+                case BitrateMode.VBR:
+                    if (!string.IsNullOrEmpty(bitrate) && SupportsTargetBitrate(encoder))
+                        sb.AppendFormat(" -b:v {0}", bitrate);
+                    break;
+                case BitrateMode.Quality:
+                    var spec = GetQualitySpec(encoder);
+                    if (spec != null && p.QualityValue > 0)
+                    {
+                        sb.AppendFormat(" {0} {1}", spec.Param, p.QualityValue);
+                        if (!string.IsNullOrEmpty(p.QualityMaxRate))
+                        {
+                            sb.AppendFormat(" -maxrate {0}", p.QualityMaxRate);
+                            sb.AppendFormat(" -bufsize {0}", DoubleBitrate(p.QualityMaxRate));
+                        }
+                    }
+                    break;
+                default: // Auto
+                    if (!string.IsNullOrEmpty(bitrate))
+                        sb.AppendFormat(" -b:v {0}", bitrate);
+                    break;
+            }
+        }
+
+        /// <summary>"5000k" → "10000k"（bufsize 一般取码率的 2 倍）。</summary>
+        private static string DoubleBitrate(string bitrate)
+        {
+            if (string.IsNullOrWhiteSpace(bitrate)) return bitrate;
+            var m = Regex.Match(bitrate.Trim(), @"^(\d+)([km]?)$", RegexOptions.IgnoreCase);
+            if (!m.Success) return bitrate;
+            long n;
+            if (!long.TryParse(m.Groups[1].Value, out n)) return bitrate;
+            return (n * 2).ToString() + m.Groups[2].Value.ToLowerInvariant();
+        }
+
+        #endregion
+
         /// <summary>
         /// Build ffmpeg argument string for a task.
         /// Honors two optional modes set on the task before a run:
@@ -497,8 +638,7 @@ namespace VideoConverter
         ///  - Segments/Crop : multi-segment trim and video cropping
         /// </summary>
         public static string BuildArguments(ConversionTask task)
-        {
-            var segment = (task.Segments != null && task.Segments.Count > 0)
+        {            var segment = (task.Segments != null && task.Segments.Count > 0)
                 ? task.Segments[0]
                 : new VideoSegment { StartMs = 0, EndMs = (long)(task.SourceDurationSeconds * 1000) };
             return BuildSegmentArguments(task, segment, task.OutputPath);
@@ -580,8 +720,7 @@ namespace VideoConverter
                         sb.AppendFormat(" -vf \"{0}\"", string.Join(",", vfParts));
                     if (!string.IsNullOrEmpty(p.ResolutionValue) && vfParts.Count == 0)
                         sb.AppendFormat(" -s {0}", p.ResolutionValue);
-                    if (!string.IsNullOrEmpty(p.VideoBitrate))
-                        sb.AppendFormat(" -b:v {0}", p.VideoBitrate);
+                    FFmpegHelper.AppendVideoBitrate(sb, p, vcodec);
                     if (!string.IsNullOrEmpty(p.FrameRate))
                         sb.AppendFormat(" -r {0}", p.FrameRate);
                 }
@@ -702,8 +841,7 @@ namespace VideoConverter
                 sb.AppendFormat(" -c:v {0}", vcodec);
                 if (!string.IsNullOrEmpty(p.ResolutionValue))
                     sb.AppendFormat(" -s {0}", p.ResolutionValue);
-                if (!string.IsNullOrEmpty(p.VideoBitrate))
-                    sb.AppendFormat(" -b:v {0}", p.VideoBitrate);
+                AppendVideoBitrate(sb, p, vcodec);
                 if (!string.IsNullOrEmpty(p.FrameRate))
                     sb.AppendFormat(" -r {0}", p.FrameRate);
             }

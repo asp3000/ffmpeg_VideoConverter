@@ -321,6 +321,12 @@ namespace VideoConverter
         public string ResolutionLabel { get; set; }
         public string ResolutionValue { get; set; }   // e.g. 1920x1080
         public string VideoBitrate { get; set; }
+        /// <summary>视频码率模式：auto / cbr / vbr / quality（null 视为 auto）。#73</summary>
+        public string BitrateMode { get; set; }
+        /// <summary>质量控制值（CRF/QP/CQ），仅 BitrateMode=quality 时有效。</summary>
+        public int QualityValue { get; set; }
+        /// <summary>质量控制模式下的最大码率限制（可选，如 "8000k"），输出 -maxrate/-bufsize。</summary>
+        public string QualityMaxRate { get; set; }
         public string AudioBitrate { get; set; }
         public string FrameRate { get; set; }
 

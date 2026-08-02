@@ -490,7 +490,10 @@ namespace VideoConverter
         frameRate = p.FrameRate,
         sampleRate = p.SampleRate,
         channels = p.Channels,
-        formatId = p.FormatId
+        formatId = p.FormatId,
+        bitrateMode = p.BitrateMode,
+        qualityValue = p.QualityValue,
+        qualityMaxRate = p.QualityMaxRate
     };
 
     private static PresetOption FromCustomJson(CustomPresetJson j) => new PresetOption
@@ -511,6 +514,9 @@ namespace VideoConverter
         FormatId = j.formatId,
         VideoCodecLabel = j.videoCodecLabel,
         CustomArgs = j.customArgs,
+        BitrateMode = j.bitrateMode,
+        QualityValue = j.qualityValue,
+        QualityMaxRate = j.qualityMaxRate,
         IsBuiltIn = false,
         KeepSource = false,
         PresetId = null,
@@ -649,6 +655,9 @@ namespace VideoConverter
         [DataMember] public string resolutionLabel { get; set; }
         [DataMember] public string resolutionValue { get; set; }
         [DataMember] public string videoBitrate { get; set; }
+        [DataMember] public string bitrateMode { get; set; }
+        [DataMember] public int qualityValue { get; set; }
+        [DataMember] public string qualityMaxRate { get; set; }
         [DataMember] public string audioBitrate { get; set; }
         [DataMember] public string frameRate { get; set; }
         [DataMember] public string sampleRate { get; set; }

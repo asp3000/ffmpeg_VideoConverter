@@ -27,6 +27,13 @@ namespace VideoConverter
         private ComboBox cmbVideoCodec;
         private ComboBox cmbResolution;
         private ComboBox cmbFrameRate;
+        private ComboBox cmbBitrateMode;   // 自动/固定码率/可变码率/质量控制
+        private Label lblRate;
+        private Label lblQuality;
+        private Label lblQualityRange;
+        private NumericUpDown numQuality;
+        private Label lblMaxRate;
+        private ComboBox cmbMaxRate;
         private ComboBox cmbVideoBitrate;
         private ComboBox cmbAudioCodec;
         private ComboBox cmbChannel;
@@ -41,6 +48,7 @@ namespace VideoConverter
 
         private FormatOptions _options;
         private FFmpegHelper.HardwareSupport _hw;
+        private bool _updatingBitrateUI;
 
         public PresetEditForm()
         {
@@ -96,11 +104,35 @@ namespace VideoConverter
             cmbResolution = CreateDropDown(col2CtrlX, y, dropW, dropH);
             y += padY;
 
-            // Row 2: Frame Rate + Bitrate
+            // Row 2: Frame Rate + Bitrate Mode
             var lblFps = new Label { Text = "帧率", Location = new Point(labelX, y + 2), Size = new Size(labelW, 20), AutoSize = false, ForeColor = Color.Gray };
             cmbFrameRate = CreateDropDown(ctrlX, y, dropW, dropH);
-            var lblVbr = new Label { Text = "码率", Location = new Point(col2LabelX, y + 2), Size = new Size(70, 20), AutoSize = false, ForeColor = Color.Gray };
-            cmbVideoBitrate = CreateDropDown(col2CtrlX, y, dropW, dropH);
+            var lblBm = new Label { Text = "码率模式", Location = new Point(col2LabelX, y + 2), Size = new Size(70, 20), AutoSize = false, ForeColor = Color.Gray };
+            cmbBitrateMode = CreateDropDown(col2CtrlX, y, dropW, dropH);
+            y += padY;
+
+            // Row 3: Bitrate (CBR/VBR) or quality control — visibility switched by mode.
+            lblRate = new Label { Text = "码率", Location = new Point(labelX, y + 2), Size = new Size(labelW, 20), AutoSize = false, ForeColor = Color.Gray };
+            cmbVideoBitrate = CreateDropDown(ctrlX, y, dropW, dropH);
+            lblQuality = new Label { Text = "质量控制值", Location = new Point(labelX, y + 2), Size = new Size(labelW, 20), AutoSize = false, ForeColor = Color.Gray, Visible = false };
+            numQuality = new NumericUpDown
+            {
+                Location = new Point(ctrlX, y),
+                Size = new Size(70, 24),
+                Font = new Font("Microsoft YaHei UI", 9F),
+                Visible = false
+            };
+            lblQualityRange = new Label
+            {
+                Location = new Point(ctrlX + 76, y + 3),
+                Size = new Size(172, 20),
+                AutoSize = false,
+                ForeColor = Color.FromArgb(90, 60, 160),
+                Visible = false
+            };
+            lblMaxRate = new Label { Text = "最大码率", Location = new Point(col2LabelX, y + 2), Size = new Size(70, 20), AutoSize = false, ForeColor = Color.Gray, Visible = false };
+            cmbMaxRate = CreateDropDown(col2CtrlX, y, dropW, dropH);
+            cmbMaxRate.Visible = false;
             y += padY + 10;
 
             // Audio section header
@@ -218,8 +250,15 @@ namespace VideoConverter
             this.Controls.Add(cmbResolution);
             this.Controls.Add(lblFps);
             this.Controls.Add(cmbFrameRate);
-            this.Controls.Add(lblVbr);
+            this.Controls.Add(lblBm);
+            this.Controls.Add(cmbBitrateMode);
+            this.Controls.Add(lblRate);
             this.Controls.Add(cmbVideoBitrate);
+            this.Controls.Add(lblQuality);
+            this.Controls.Add(numQuality);
+            this.Controls.Add(lblQualityRange);
+            this.Controls.Add(lblMaxRate);
+            this.Controls.Add(cmbMaxRate);
             this.Controls.Add(lblAudioSection);
             this.Controls.Add(lblAEncoder);
             this.Controls.Add(cmbAudioCodec);
@@ -256,6 +295,9 @@ namespace VideoConverter
                 ? "与源文件相同"
                 : snap.ResolutionValue.Replace("x", " x ");
             snap.FrameRate = GetComboValue(cmbFrameRate, null);
+            snap.BitrateMode = SelectedBitrateModeString();
+            snap.QualityValue = (int)numQuality.Value;
+            snap.QualityMaxRate = GetComboValue(cmbMaxRate, null);
             snap.VideoBitrate = GetComboValue(cmbVideoBitrate, null);
             snap.AudioCodec = GetComboValue(cmbAudioCodec, "copy");
             if (int.TryParse(GetComboValue(cmbChannel, null), out int ch))
@@ -284,6 +326,83 @@ namespace VideoConverter
             catch
             {
                 txtPreview.Text = "";
+            }
+        }
+
+        /// <summary>当前选中的码率模式值（auto/cbr/vbr/quality）。</summary>
+        private string SelectedBitrateModeString()
+        {
+            var it = cmbBitrateMode.SelectedItem as OptionItem;
+            return (it != null && !string.IsNullOrEmpty(it.Value)) ? it.Value : "auto";
+        }
+
+        /// <summary>
+        /// 按当前编码器（CPU/GPU 解析后）重建「码率模式」选项并联动显示：
+        ///   固定码率/可变码率 → 显示码率下拉；质量控制 → 显示数值范围控件 + 最大码率。
+        /// 编码器不支持的模式不会出现在下拉中（如 copy 不支持任何目标码率，仅"自动"）。
+        /// </summary>
+        private void UpdateBitrateUI()
+        {
+            if (_updatingBitrateUI) return;
+            _updatingBitrateUI = true;
+            try
+            {
+                string fourCC = GetComboValue(cmbVideoCodec, "copy");
+                string encoder = FFmpegHelper.ResolveVideoEncoder(fourCC, UseHardwareEncoding ? _hw : null);
+                var spec = FFmpegHelper.GetQualitySpec(encoder);
+                bool canTarget = FFmpegHelper.SupportsTargetBitrate(encoder);
+
+                // ComboBox 无法逐项禁用，只能按编码器支持重建选项列表。
+                string cur = SelectedBitrateModeString();
+                var modes = new List<OptionItem> { new OptionItem("auto", "自动") };
+                if (canTarget)
+                {
+                    modes.Add(new OptionItem("cbr", "固定码率"));
+                    modes.Add(new OptionItem("vbr", "可变码率"));
+                }
+                if (spec != null)
+                    modes.Add(new OptionItem("quality", "质量控制"));
+
+                cmbBitrateMode.DataSource = null;
+                cmbBitrateMode.DisplayMember = "Label";
+                cmbBitrateMode.ValueMember = "Value";
+                cmbBitrateMode.DataSource = modes;
+                int idx = modes.FindIndex(m => string.Equals(m.Value, cur, StringComparison.OrdinalIgnoreCase));
+                cmbBitrateMode.SelectedIndex = idx >= 0 ? idx : 0;
+
+                string mode = SelectedBitrateModeString();
+                bool isQuality = string.Equals(mode, "quality", StringComparison.OrdinalIgnoreCase);
+                bool isTarget = string.Equals(mode, "cbr", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(mode, "vbr", StringComparison.OrdinalIgnoreCase);
+
+                lblRate.Visible = isTarget;
+                cmbVideoBitrate.Visible = isTarget;
+                lblQuality.Visible = isQuality;
+                numQuality.Visible = isQuality;
+                lblQualityRange.Visible = isQuality;
+                lblMaxRate.Visible = isQuality;
+                cmbMaxRate.Visible = isQuality;
+
+                if (isQuality && spec != null)
+                {
+                    numQuality.Minimum = spec.Min;
+                    numQuality.Maximum = spec.Max;
+                    int want = (Preset != null && Preset.QualityValue > 0)
+                        ? Preset.QualityValue
+                        : spec.Recommended;
+                    // 默认 0 或越界 → 落到推荐值；用户手动调整过的有效值保留。
+                    if (numQuality.Value == 0 || numQuality.Value < spec.Min || numQuality.Value > spec.Max)
+                        numQuality.Value = want;
+                    lblQualityRange.Text = string.Format("{0}（参数 {1}）", spec.ToString(), spec.Param);
+                }
+            }
+            catch
+            {
+                // 界面初始化的极早期调用：控件尚未就绪时忽略。
+            }
+            finally
+            {
+                _updatingBitrateUI = false;
             }
         }
 
@@ -331,6 +450,7 @@ namespace VideoConverter
                 LoadCombo(cmbChannel, _options.Channels, Preset.Channels > 0 ? Preset.Channels.ToString() : null, "自动");
                 LoadCombo(cmbSampleRate, _options.SampleRates, Preset.SampleRate, "自动");
                 LoadCombo(cmbAudioBitrate, _options.AudioBitrates, Preset.AudioBitrate, "自动");
+                LoadCombo(cmbMaxRate, _options.VideoBitrates, Preset.QualityMaxRate, "自动");
 
                 txtTitle.Text = Preset.Name ?? "";
                 txtCustomArgs.Text = Preset.CustomArgs ?? "";
@@ -341,8 +461,29 @@ namespace VideoConverter
                 try { _hw = FFmpegHelper.DetectHardwareEncodersAsync().GetAwaiter().GetResult(); }
                 catch { _hw = new FFmpegHelper.HardwareSupport(); }
 
+                // 初始码率模式下拉（UpdateBitrateUI 会按编码器支持重建并保留当前选中）。
+                var initModes = new List<OptionItem>
+                {
+                    new OptionItem("auto", "自动"),
+                    new OptionItem("cbr", "固定码率"),
+                    new OptionItem("vbr", "可变码率"),
+                    new OptionItem("quality", "质量控制")
+                };
+                cmbBitrateMode.DataSource = null;
+                cmbBitrateMode.DisplayMember = "Label";
+                cmbBitrateMode.ValueMember = "Value";
+                cmbBitrateMode.DataSource = initModes;
+                string pm = string.IsNullOrEmpty(Preset.BitrateMode) ? "auto" : Preset.BitrateMode;
+                int pi = initModes.FindIndex(m => string.Equals(m.Value, pm, StringComparison.OrdinalIgnoreCase));
+                cmbBitrateMode.SelectedIndex = pi >= 0 ? pi : 0;
+
+                // 码率模式：按编码器支持动态重建选项，并联动质量控制/码率显示。
+                cmbBitrateMode.SelectedIndexChanged += (s, e) => { UpdateBitrateUI(); UpdatePreview(); };
+                cmbVideoCodec.SelectedIndexChanged += (s, e) => { UpdateBitrateUI(); UpdatePreview(); };
+                numQuality.ValueChanged += (s, e) => UpdatePreview();
+                cmbMaxRate.SelectedIndexChanged += (s, e) => UpdatePreview();
+
                 // 任一参数变化 → 实时刷新 ffmpeg 参数预览
-                cmbVideoCodec.SelectedIndexChanged += (s, e) => UpdatePreview();
                 cmbResolution.SelectedIndexChanged += (s, e) => UpdatePreview();
                 cmbFrameRate.SelectedIndexChanged += (s, e) => UpdatePreview();
                 cmbVideoBitrate.SelectedIndexChanged += (s, e) => UpdatePreview();
@@ -351,6 +492,7 @@ namespace VideoConverter
                 cmbSampleRate.SelectedIndexChanged += (s, e) => UpdatePreview();
                 cmbAudioBitrate.SelectedIndexChanged += (s, e) => UpdatePreview();
                 txtCustomArgs.TextChanged += (s, e) => UpdatePreview();
+                UpdateBitrateUI();
                 UpdatePreview();
 
                 // Built-in presets cannot be overwritten; force "另存为" semantics.
@@ -464,6 +606,9 @@ namespace VideoConverter
                     ? "与源文件相同"
                     : Preset.ResolutionValue.Replace("x", " x ");
                 Preset.FrameRate = GetComboValue(cmbFrameRate, null);
+                Preset.BitrateMode = SelectedBitrateModeString();
+                Preset.QualityValue = (int)numQuality.Value;
+                Preset.QualityMaxRate = GetComboValue(cmbMaxRate, null);
                 Preset.VideoBitrate = GetComboValue(cmbVideoBitrate, null);
                 Preset.AudioCodec = GetComboValue(cmbAudioCodec, "copy");
                 if (int.TryParse(GetComboValue(cmbChannel, null), out int ch))
