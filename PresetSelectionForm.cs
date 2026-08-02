@@ -183,7 +183,10 @@ namespace VideoConverter
                 BackColor = Color.FromArgb(248, 246, 252),
                 Padding = new Padding(0)
             };
+            // 关键：必须置于最底层（z-order 后端），否则 Dock Fill 会在 Top 面板
+            // 之前被布局，撑满整个窗口高度，导致分类/预设列表首项被顶部页签遮挡。
             this.Controls.Add(_contentPanel);
+            this.Controls.SetChildIndex(_contentPanel, 0);
 
             // 单列列表（最近使用 / 自定义）
             _singleList = new FlowLayoutPanel
@@ -219,6 +222,9 @@ namespace VideoConverter
                 Padding = new Padding(8, 12, 8, 12)
             };
             _contentPanel.Controls.Add(_splitLeft);
+            // 右侧预设列表(Dock Fill)置于底层，左侧格式列表(Dock Left)在前，
+            // 保证左侧 172px 被预留、右侧填充剩余宽度。
+            _contentPanel.Controls.SetChildIndex(_splitRight, 0);
         }
 
         private void RefreshCurrent()
@@ -353,11 +359,14 @@ namespace VideoConverter
 
             if (showCategory)
             {
+                // 显示格式类型（如 MP4），而非大类（视频/音频），便于区分最近使用项。
+                string typeText = !string.IsNullOrEmpty(p.FormatName) ? p.FormatName
+                    : (!string.IsNullOrEmpty(p.FormatId) ? p.FormatId.ToUpperInvariant() : (p.Category ?? ""));
                 var chip = new Label
                 {
                     Location = new Point(x, 13),
                     Size = new Size(64, 22),
-                    Text = p.Category ?? "",
+                    Text = typeText,
                     BackColor = Color.FromArgb(237, 232, 248),
                     ForeColor = Color.FromArgb(90, 60, 160),
                     Font = new Font("Microsoft YaHei UI", 8.5F),
