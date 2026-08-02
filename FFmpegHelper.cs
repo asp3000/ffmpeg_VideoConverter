@@ -641,6 +641,65 @@ namespace VideoConverter
         }
 
         /// <summary>
+        /// Build the fully-resolved ffmpeg parameter string for a standalone
+        /// preset (no trim / crop / segment specifics), used by the preset
+        /// editor's live preview. Mirrors the codec/bitrate/resolution/audio
+        /// resolution of <see cref="BuildSegmentArguments"/>.
+        /// The video encoder is resolved through <see cref="ResolveVideoEncoder"/>
+        /// so GPU encoders (e.g. h264_nvenc) appear when hardware is available.
+        /// </summary>
+        public static string BuildPresetPreviewArguments(PresetOption p, HardwareSupport hw)
+        {
+            if (p == null) return string.Empty;
+            var sb = new StringBuilder();
+            sb.Append("ffmpeg -i \"<输入文件>\"");
+
+            string vcodec = ResolveVideoEncoder(p.VideoCodec, hw);
+            if (string.Equals(p.VideoCodec, "copy", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(vcodec, "copy", StringComparison.OrdinalIgnoreCase))
+            {
+                sb.Append(" -c:v copy");
+            }
+            else if (!string.IsNullOrEmpty(vcodec))
+            {
+                sb.AppendFormat(" -c:v {0}", vcodec);
+                if (!string.IsNullOrEmpty(p.ResolutionValue))
+                    sb.AppendFormat(" -s {0}", p.ResolutionValue);
+                if (!string.IsNullOrEmpty(p.VideoBitrate))
+                    sb.AppendFormat(" -b:v {0}", p.VideoBitrate);
+                if (!string.IsNullOrEmpty(p.FrameRate))
+                    sb.AppendFormat(" -r {0}", p.FrameRate);
+            }
+
+            if (string.IsNullOrEmpty(p.AudioCodec))
+            {
+                sb.Append(" -an");
+            }
+            else if (string.Equals(p.AudioCodec, "copy", StringComparison.OrdinalIgnoreCase))
+            {
+                sb.Append(" -c:a copy");
+            }
+            else
+            {
+                sb.AppendFormat(" -c:a {0}", p.AudioCodec);
+                if (!string.IsNullOrEmpty(p.AudioBitrate))
+                    sb.AppendFormat(" -b:a {0}", p.AudioBitrate);
+                if (!string.IsNullOrEmpty(p.SampleRate))
+                    sb.AppendFormat(" -ar {0}", p.SampleRate);
+                if (p.Channels > 0)
+                    sb.AppendFormat(" -ac {0}", p.Channels);
+            }
+
+            sb.Append(" -sn");
+
+            if (!string.IsNullOrWhiteSpace(p.CustomArgs))
+                sb.Append(" " + p.CustomArgs.Trim());
+
+            sb.Append(" \"<输出文件>\"");
+            return sb.ToString();
+        }
+
+        /// <summary>
         /// Run ffmpeg with progress callbacks.
         /// Handles single segment, multi-segment merge, and multi-segment split output.
         /// </summary>

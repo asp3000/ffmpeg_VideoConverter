@@ -30,12 +30,14 @@ namespace VideoConverter
         private ComboBox cmbSampleRate;
         private ComboBox cmbAudioBitrate;
         private TextBox txtCustomArgs;
+        private TextBox txtPreview;
         private CheckBox chkSaveAsNew;
         private Button btnSave;
         private Button btnCancel;
         private Label lblAudioSection;
 
         private FormatOptions _options;
+        private FFmpegHelper.HardwareSupport _hw;
 
         public PresetEditForm()
         {
@@ -140,6 +142,29 @@ namespace VideoConverter
             };
             y += 40;
 
+            // ffmpeg 参数解析预览（只读，可复制，随参数变化实时更新）
+            var lblPreview = new Label
+            {
+                Text = "参数预览 (ffmpeg)",
+                Location = new Point(labelX, y + 2),
+                Size = new Size(160, 20),
+                AutoSize = false,
+                ForeColor = Color.Gray
+            };
+            y += 26;
+            txtPreview = new TextBox
+            {
+                Location = new Point(labelX, y),
+                Size = new Size(528, 76),
+                Multiline = true,
+                ReadOnly = true,
+                BackColor = Color.FromArgb(248, 246, 252),
+                ScrollBars = ScrollBars.Vertical,
+                Font = new Font("Consolas", 9F),
+                WordWrap = false
+            };
+            y += 76 + 14;
+
             // Save as new preset checkbox
             chkSaveAsNew = new CheckBox
             {
@@ -203,12 +228,60 @@ namespace VideoConverter
             this.Controls.Add(cmbAudioBitrate);
             this.Controls.Add(lblCustom);
             this.Controls.Add(txtCustomArgs);
+            this.Controls.Add(lblPreview);
+            this.Controls.Add(txtPreview);
             this.Controls.Add(chkSaveAsNew);
             this.Controls.Add(btnSave);
             this.Controls.Add(btnCancel);
 
             this.AcceptButton = btnSave;
             this.CancelButton = btnCancel;
+        }
+
+        /// <summary>
+        /// 把当前界面参数汇总成一个临时 PresetOption（不改动原始 Preset 成员），
+        /// 用于实时预览完整的 ffmpeg 参数。
+        /// </summary>
+        private PresetOption GatherPreviewPreset()
+        {
+            var snap = Preset != null ? Preset.Clone() : new PresetOption();
+            snap.VideoCodec = GetComboValue(cmbVideoCodec, "copy");
+            var vitem = cmbVideoCodec.SelectedItem as OptionItem;
+            snap.VideoCodecLabel = (cmbVideoCodec.SelectedIndex > 0 && vitem != null) ? vitem.Label : null;
+            snap.ResolutionValue = GetComboValue(cmbResolution, null);
+            snap.ResolutionLabel = string.IsNullOrEmpty(snap.ResolutionValue)
+                ? "与源文件相同"
+                : snap.ResolutionValue.Replace("x", " x ");
+            snap.FrameRate = GetComboValue(cmbFrameRate, null);
+            snap.VideoBitrate = GetComboValue(cmbVideoBitrate, null);
+            snap.AudioCodec = GetComboValue(cmbAudioCodec, "copy");
+            if (int.TryParse(GetComboValue(cmbChannel, null), out int ch))
+                snap.Channels = ch;
+            else
+                snap.Channels = 0;
+            snap.SampleRate = GetComboValue(cmbSampleRate, null);
+            snap.AudioBitrate = GetComboValue(cmbAudioBitrate, null);
+            snap.CustomArgs = txtCustomArgs.Text.Trim();
+            if (!string.IsNullOrWhiteSpace(txtTitle.Text.Trim()))
+                snap.Name = txtTitle.Text.Trim();
+            return snap;
+        }
+
+        /// <summary>
+        /// 刷新只读的 ffmpeg 参数预览框，反映当前界面的所有参数选择。
+        /// </summary>
+        private void UpdatePreview()
+        {
+            if (txtPreview == null) return;
+            try
+            {
+                var snap = GatherPreviewPreset();
+                txtPreview.Text = FFmpegHelper.BuildPresetPreviewArguments(snap, _hw);
+            }
+            catch
+            {
+                txtPreview.Text = "";
+            }
         }
 
         /// <summary>标题显示「类型 名称」，例如 “MP4 Video 1080P 超清”。</summary>
@@ -259,6 +332,23 @@ namespace VideoConverter
                 txtTitle.Text = Preset.Name ?? "";
                 txtCustomArgs.Text = Preset.CustomArgs ?? "";
                 UpdateTitle();
+
+                // 检测机器可用的硬件编码器，用于预览完整的 ffmpeg 视频编码器
+                // （如 h264_nvenc）；检测失败则回退到 CPU 编码器。
+                try { _hw = FFmpegHelper.DetectHardwareEncodersAsync().GetAwaiter().GetResult(); }
+                catch { _hw = new FFmpegHelper.HardwareSupport(); }
+
+                // 任一参数变化 → 实时刷新 ffmpeg 参数预览
+                cmbVideoCodec.SelectedIndexChanged += (s, e) => UpdatePreview();
+                cmbResolution.SelectedIndexChanged += (s, e) => UpdatePreview();
+                cmbFrameRate.SelectedIndexChanged += (s, e) => UpdatePreview();
+                cmbVideoBitrate.SelectedIndexChanged += (s, e) => UpdatePreview();
+                cmbAudioCodec.SelectedIndexChanged += (s, e) => UpdatePreview();
+                cmbChannel.SelectedIndexChanged += (s, e) => UpdatePreview();
+                cmbSampleRate.SelectedIndexChanged += (s, e) => UpdatePreview();
+                cmbAudioBitrate.SelectedIndexChanged += (s, e) => UpdatePreview();
+                txtCustomArgs.TextChanged += (s, e) => UpdatePreview();
+                UpdatePreview();
 
                 // Built-in presets cannot be overwritten; force "另存为" semantics.
                 if (Preset.IsBuiltIn)
