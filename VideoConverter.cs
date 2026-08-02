@@ -29,6 +29,9 @@ namespace VideoConverter
 
         private bool _batchConverting;
 
+        // 主界面正中间的 ffmpeg 版本号（点击打开下载更新窗）。
+        private Label ffmpegVersionLabel;
+
         // The single currently-selected card (null when none selected). #42
         private RoundedPanel _selectedCard;
         // Pending hardware-encode preference, applied once HW detection completes. #47
@@ -69,6 +72,7 @@ namespace VideoConverter
 
             SetupPresets();
             SetupSaveTo();
+            SetupFfmpegVersionLabel();
             ApplyCheckStyle(highSpeedCheck);
             ApplyCheckStyle(hardwareCheck);
             UpdateTabStyles();
@@ -242,6 +246,54 @@ namespace VideoConverter
                 string.Equals(sel, "选择文件夹...", StringComparison.Ordinal))
                 return null;
             return sel;
+        }
+
+        /// <summary>
+        /// 在顶部工具栏正中间创建可点击的 ffmpeg 版本号，点击弹出下载更新窗。
+        /// </summary>
+        private void SetupFfmpegVersionLabel()
+        {
+            ffmpegVersionLabel = new Label
+            {
+                Text = "ffmpeg ...",
+                AutoSize = true,
+                Cursor = Cursors.Hand,
+                Font = new Font("Microsoft YaHei UI", 9F),
+                ForeColor = Color.FromArgb(124, 77, 255),
+                Tag = "版本号"
+            };
+            ffmpegVersionLabel.Click += FfmpegVersionLabel_Click;
+            topPanel.Controls.Add(ffmpegVersionLabel);
+            CenterFfmpegVersionLabel();
+
+            this.Resize += (s, e) => CenterFfmpegVersionLabel();
+
+            // 后台读取本地 ffmpeg 版本，不阻塞 UI。
+            _ = LoadFfmpegVersionAsync();
+        }
+
+        private void CenterFfmpegVersionLabel()
+        {
+            if (ffmpegVersionLabel == null || topPanel == null) return;
+            int x = Math.Max(8, (topPanel.ClientSize.Width - ffmpegVersionLabel.PreferredWidth) / 2);
+            ffmpegVersionLabel.Location = new Point(x, (topPanel.ClientSize.Height - ffmpegVersionLabel.PreferredHeight) / 2 + 1);
+        }
+
+        private async Task LoadFfmpegVersionAsync()
+        {
+            string v = await FFmpegHelper.GetInstalledVersionAsync();
+            if (IsDisposed || ffmpegVersionLabel == null) return;
+            ffmpegVersionLabel.Text = string.IsNullOrEmpty(v) ? "ffmpeg 未安装" : "ffmpeg " + v;
+            CenterFfmpegVersionLabel();
+        }
+
+        private void FfmpegVersionLabel_Click(object sender, EventArgs e)
+        {
+            using (var dlg = new FfmpegUpdateForm(ffmpegVersionLabel.Text.Replace("ffmpeg ", "")))
+            {
+                dlg.ShowDialog(this);
+            }
+            _ = LoadFfmpegVersionAsync();
         }
 
         #endregion

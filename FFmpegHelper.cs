@@ -150,6 +150,41 @@ namespace VideoConverter
         #endregion
 
         /// <summary>
+        /// Run "ffmpeg -version" and return the version token after "ffmpeg version",
+        /// e.g. "7.1.1" or "N-116000-gabc123". Returns null when ffmpeg is missing
+        /// or cannot be run.
+        /// </summary>
+        public static async Task<string> GetInstalledVersionAsync()
+        {
+            try
+            {
+                if (!File.Exists(FFmpegPath)) return null;
+                var psi = new ProcessStartInfo
+                {
+                    FileName = FFmpegPath,
+                    Arguments = "-version",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = Encoding.UTF8
+                };
+                using (var proc = Process.Start(psi))
+                {
+                    string first = await proc.StandardOutput.ReadLineAsync().ConfigureAwait(false);
+                    if (string.IsNullOrWhiteSpace(first)) return null;
+                    var m = Regex.Match(first, @"ffmpeg\s+version\s+([^\s]+)", RegexOptions.IgnoreCase);
+                    if (m.Success) return m.Groups[1].Value.Trim();
+                    return first.Trim();
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Returns the folder that contains ffmpeg.exe. Tries the project setting first,
         /// then the user-supplied path.
         /// </summary>
