@@ -1034,6 +1034,7 @@ namespace VideoConverter
             using (var dlg = new PresetEditForm())
             {
                 dlg.Preset = task.Preset;
+                dlg.UseHardwareEncoding = hardwareCheck.Checked;
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     task.Preset = dlg.Preset;
@@ -1244,6 +1245,7 @@ namespace VideoConverter
             using (var dlg = new PresetEditForm())
             {
                 dlg.Preset = _globalPreset.Clone();
+                dlg.UseHardwareEncoding = hardwareCheck.Checked;
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     _globalPreset = dlg.Preset;

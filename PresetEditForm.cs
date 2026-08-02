@@ -20,6 +20,9 @@ namespace VideoConverter
     {
         public PresetOption Preset { get; set; }
 
+        /// <summary>是否勾选硬件编码（由主窗体传入）。预览按此决定 GPU/CPU 编码器。</summary>
+        public bool UseHardwareEncoding { get; set; }
+
         private TextBox txtTitle;
         private ComboBox cmbVideoCodec;
         private ComboBox cmbResolution;
@@ -276,7 +279,7 @@ namespace VideoConverter
             try
             {
                 var snap = GatherPreviewPreset();
-                txtPreview.Text = FFmpegHelper.BuildPresetPreviewArguments(snap, _hw);
+                txtPreview.Text = FFmpegHelper.BuildPresetPreviewArguments(snap, _hw, UseHardwareEncoding);
             }
             catch
             {

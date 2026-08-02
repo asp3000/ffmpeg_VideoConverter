@@ -680,16 +680,18 @@ namespace VideoConverter
         /// preset (no trim / crop / segment specifics), used by the preset
         /// editor's live preview. Mirrors the codec/bitrate/resolution/audio
         /// resolution of <see cref="BuildSegmentArguments"/>.
-        /// The video encoder is resolved through <see cref="ResolveVideoEncoder"/>
-        /// so GPU encoders (e.g. h264_nvenc) appear when hardware is available.
+        /// The video encoder is resolved through <see cref="ResolveVideoEncoder"/>:
+        /// GPU encoders (e.g. h264_nvenc) appear only when <paramref name="useHardware"/>
+        /// is set AND a matching GPU encoder is available; otherwise the CPU
+        /// encoder (e.g. libx264) is shown, matching real conversion behavior.
         /// </summary>
-        public static string BuildPresetPreviewArguments(PresetOption p, HardwareSupport hw)
+        public static string BuildPresetPreviewArguments(PresetOption p, HardwareSupport hw, bool useHardware)
         {
             if (p == null) return string.Empty;
             var sb = new StringBuilder();
             sb.Append("ffmpeg -i \"<输入文件>\"");
 
-            string vcodec = ResolveVideoEncoder(p.VideoCodec, hw);
+            string vcodec = ResolveVideoEncoder(p.VideoCodec, useHardware ? hw : null);
             if (string.Equals(p.VideoCodec, "copy", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(vcodec, "copy", StringComparison.OrdinalIgnoreCase))
             {
