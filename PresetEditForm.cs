@@ -44,6 +44,7 @@ namespace VideoConverter
             this.Text = "预设编辑";
             this.BackColor = Color.White;
             this.Font = new Font("Microsoft YaHei UI", 9F);
+            this.AutoScaleMode = AutoScaleMode.None;   // 代码构建窗体需关闭字体自动缩放，否则左边缘控件被缩放/裁剪
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
@@ -56,22 +57,27 @@ namespace VideoConverter
             int dropW = 160;
             int dropH = 24;
             int padY = 34;
+            int labelX = 16;     // 标签列固定左边缘
+            int ctrlX = 92;      // 控件列固定左边缘（与标签列留出间距，避免重叠）
+            int col2LabelX = 272;
+            int col2CtrlX = 346;
 
             // Title
-            var lblTitle = new Label { Text = "标题", Location = new Point(16, y), Size = new Size(labelW, 20) };
+            var lblTitle = new Label { Text = "标题", Location = new Point(labelX, y), Size = new Size(labelW, 20), AutoSize = false };
             txtTitle = new TextBox
             {
-                Location = new Point(80, y - 2),
-                Size = new Size(420, 24),
+                Location = new Point(ctrlX, y - 2),
+                Size = new Size(440, 24),
                 Font = new Font("Microsoft YaHei UI", 9F)
             };
+            txtTitle.TextChanged += (s, e) => UpdateTitle();
             y += 44;
 
             // Video section header
             var lblVideo = new Label
             {
                 Text = "视频",
-                Location = new Point(16, y),
+                Location = new Point(labelX, y),
                 Size = new Size(80, 22),
                 Font = new Font("Microsoft YaHei UI", 11F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(45, 45, 45)
@@ -79,24 +85,24 @@ namespace VideoConverter
             y += 32;
 
             // Row 1: Encoder + Resolution
-            var lblEncoder = new Label { Text = "编码器", Location = new Point(16, y + 2), Size = new Size(labelW, 20), ForeColor = Color.Gray };
-            cmbVideoCodec = CreateDropDown(80, y, dropW, dropH);
-            var lblRes = new Label { Text = "分辨率", Location = new Point(260, y + 2), Size = new Size(70, 20), ForeColor = Color.Gray };
-            cmbResolution = CreateDropDown(340, y, dropW, dropH);
+            var lblEncoder = new Label { Text = "编码器", Location = new Point(labelX, y + 2), Size = new Size(labelW, 20), AutoSize = false, ForeColor = Color.Gray };
+            cmbVideoCodec = CreateDropDown(ctrlX, y, dropW, dropH);
+            var lblRes = new Label { Text = "分辨率", Location = new Point(col2LabelX, y + 2), Size = new Size(70, 20), AutoSize = false, ForeColor = Color.Gray };
+            cmbResolution = CreateDropDown(col2CtrlX, y, dropW, dropH);
             y += padY;
 
             // Row 2: Frame Rate + Bitrate
-            var lblFps = new Label { Text = "帧率", Location = new Point(16, y + 2), Size = new Size(labelW, 20), ForeColor = Color.Gray };
-            cmbFrameRate = CreateDropDown(80, y, dropW, dropH);
-            var lblVbr = new Label { Text = "码率", Location = new Point(260, y + 2), Size = new Size(70, 20), ForeColor = Color.Gray };
-            cmbVideoBitrate = CreateDropDown(340, y, dropW, dropH);
+            var lblFps = new Label { Text = "帧率", Location = new Point(labelX, y + 2), Size = new Size(labelW, 20), AutoSize = false, ForeColor = Color.Gray };
+            cmbFrameRate = CreateDropDown(ctrlX, y, dropW, dropH);
+            var lblVbr = new Label { Text = "码率", Location = new Point(col2LabelX, y + 2), Size = new Size(70, 20), AutoSize = false, ForeColor = Color.Gray };
+            cmbVideoBitrate = CreateDropDown(col2CtrlX, y, dropW, dropH);
             y += padY + 10;
 
             // Audio section header
             lblAudioSection = new Label
             {
                 Text = "音频",
-                Location = new Point(16, y),
+                Location = new Point(labelX, y),
                 Size = new Size(80, 22),
                 Font = new Font("Microsoft YaHei UI", 11F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(45, 45, 45)
@@ -104,31 +110,32 @@ namespace VideoConverter
             y += 32;
 
             // Row 1: Audio Encoder + Channel
-            var lblAEncoder = new Label { Text = "编码器", Location = new Point(16, y + 2), Size = new Size(labelW, 20), ForeColor = Color.Gray };
-            cmbAudioCodec = CreateDropDown(80, y, dropW, dropH);
-            var lblChannel = new Label { Text = "声道", Location = new Point(260, y + 2), Size = new Size(70, 20), ForeColor = Color.Gray };
-            cmbChannel = CreateDropDown(340, y, dropW, dropH);
+            var lblAEncoder = new Label { Text = "编码器", Location = new Point(labelX, y + 2), Size = new Size(labelW, 20), AutoSize = false, ForeColor = Color.Gray };
+            cmbAudioCodec = CreateDropDown(ctrlX, y, dropW, dropH);
+            var lblChannel = new Label { Text = "声道", Location = new Point(col2LabelX, y + 2), Size = new Size(70, 20), AutoSize = false, ForeColor = Color.Gray };
+            cmbChannel = CreateDropDown(col2CtrlX, y, dropW, dropH);
             y += padY;
 
             // Row 2: Sample Rate + Audio Bitrate
-            var lblSr = new Label { Text = "采样率", Location = new Point(16, y + 2), Size = new Size(labelW, 20), ForeColor = Color.Gray };
-            cmbSampleRate = CreateDropDown(80, y, dropW, dropH);
-            var lblAbr = new Label { Text = "码率", Location = new Point(260, y + 2), Size = new Size(70, 20), ForeColor = Color.Gray };
-            cmbAudioBitrate = CreateDropDown(340, y, dropW, dropH);
+            var lblSr = new Label { Text = "采样率", Location = new Point(labelX, y + 2), Size = new Size(labelW, 20), AutoSize = false, ForeColor = Color.Gray };
+            cmbSampleRate = CreateDropDown(ctrlX, y, dropW, dropH);
+            var lblAbr = new Label { Text = "码率", Location = new Point(col2LabelX, y + 2), Size = new Size(70, 20), AutoSize = false, ForeColor = Color.Gray };
+            cmbAudioBitrate = CreateDropDown(col2CtrlX, y, dropW, dropH);
             y += padY + 16;
 
             // Custom parameters (advanced ffmpeg args)
             var lblCustom = new Label
             {
                 Text = "自定义参数",
-                Location = new Point(16, y + 2),
+                Location = new Point(labelX, y + 2),
                 Size = new Size(70, 20),
+                AutoSize = false,
                 ForeColor = Color.Gray
             };
             txtCustomArgs = new TextBox
             {
-                Location = new Point(90, y),
-                Size = new Size(410, 24),
+                Location = new Point(ctrlX, y),
+                Size = new Size(440, 24),
                 Font = new Font("Microsoft YaHei UI", 9F)
             };
             y += 40;
@@ -137,7 +144,7 @@ namespace VideoConverter
             chkSaveAsNew = new CheckBox
             {
                 Text = "另存为新预设",
-                Location = new Point(16, y),
+                Location = new Point(labelX, y),
                 Size = new Size(160, 22),
                 ForeColor = Color.Gray,
                 BackColor = Color.White
@@ -148,7 +155,7 @@ namespace VideoConverter
             btnSave = new Button
             {
                 Text = "保存",
-                Location = new Point(340, y),
+                Location = new Point(360, y),
                 Size = new Size(80, 32),
                 BackColor = Color.FromArgb(124, 77, 255),
                 ForeColor = Color.White,
@@ -162,7 +169,7 @@ namespace VideoConverter
             btnCancel = new Button
             {
                 Text = "取消",
-                Location = new Point(430, y),
+                Location = new Point(450, y),
                 Size = new Size(80, 32),
                 BackColor = Color.White,
                 ForeColor = Color.FromArgb(80, 80, 80),
@@ -172,7 +179,7 @@ namespace VideoConverter
             btnCancel.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
             btnCancel.DialogResult = DialogResult.Cancel;
 
-            this.ClientSize = new Size(530, y + 80);
+            this.ClientSize = new Size(560, y + 80);
 
             this.Controls.Add(lblTitle);
             this.Controls.Add(txtTitle);
@@ -202,6 +209,17 @@ namespace VideoConverter
 
             this.AcceptButton = btnSave;
             this.CancelButton = btnCancel;
+        }
+
+        /// <summary>标题显示「类型 名称」，例如 “MP4 Video 1080P 超清”。</summary>
+        private void UpdateTitle()
+        {
+            string fmt = Preset?.FormatName;
+            string name = txtTitle != null ? txtTitle.Text.Trim() : "";
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(fmt)) parts.Add(fmt);
+            if (!string.IsNullOrEmpty(name)) parts.Add(name);
+            this.Text = parts.Count > 0 ? string.Join(" ", parts) : "预设编辑";
         }
 
         private ComboBox CreateDropDown(int x, int y, int w, int h)
@@ -240,6 +258,7 @@ namespace VideoConverter
 
                 txtTitle.Text = Preset.Name ?? "";
                 txtCustomArgs.Text = Preset.CustomArgs ?? "";
+                UpdateTitle();
 
                 // Built-in presets cannot be overwritten; force "另存为" semantics.
                 if (Preset.IsBuiltIn)

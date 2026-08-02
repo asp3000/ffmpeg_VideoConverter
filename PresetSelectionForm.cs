@@ -37,6 +37,7 @@ namespace VideoConverter
             this.Text = "选择预设";
             this.BackColor = Color.White;
             this.Font = new Font("Microsoft YaHei UI", 9F);
+            this.AutoScaleMode = AutoScaleMode.None;   // 代码构建窗体需关闭字体自动缩放，否则控件会被缩放/裁剪
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;

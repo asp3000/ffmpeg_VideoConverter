@@ -530,7 +530,9 @@ namespace VideoConverter
                     vfParts.Add(string.Format("scale={0}", p.ResolutionValue.Replace("x", ":")));
 
                 // Video
-                string vcodec = !string.IsNullOrEmpty(task.HardwareEncoder) ? task.HardwareEncoder : p.VideoCodec;
+                string vcodec = !string.IsNullOrEmpty(task.HardwareEncoder)
+                    ? task.HardwareEncoder
+                    : PresetDataStore.GetCpuEncoder(p.VideoCodec);
                 if (string.Equals(p.VideoCodec, "copy", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(vcodec, "copy", StringComparison.OrdinalIgnoreCase))
                 {
@@ -594,7 +596,9 @@ namespace VideoConverter
             var p = task.Preset;
             if (p != null)
             {
-                string vcodec = !string.IsNullOrEmpty(task.HardwareEncoder) ? task.HardwareEncoder : p.VideoCodec;
+                string vcodec = !string.IsNullOrEmpty(task.HardwareEncoder)
+                    ? task.HardwareEncoder
+                    : PresetDataStore.GetCpuEncoder(p.VideoCodec);
                 if (string.Equals(p.VideoCodec, "copy", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(vcodec, "copy", StringComparison.OrdinalIgnoreCase))
                 {
@@ -731,7 +735,9 @@ namespace VideoConverter
             var p = task.Preset;
             if (p != null)
             {
-                string vcodec = !string.IsNullOrEmpty(task.HardwareEncoder) ? task.HardwareEncoder : p.VideoCodec;
+                string vcodec = !string.IsNullOrEmpty(task.HardwareEncoder)
+                    ? task.HardwareEncoder
+                    : PresetDataStore.GetCpuEncoder(p.VideoCodec);
                 // Merging segments requires re-encoding; ignore "copy" requests.
                 bool forceVideoEncode = task.Segments != null && task.Segments.Count > 0;
                 if (!forceVideoEncode &&
