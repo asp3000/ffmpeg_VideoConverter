@@ -25,8 +25,10 @@ namespace VideoConverter
         private FlowLayoutPanel _singleList;   // 最近使用 / 自定义
         private Panel _splitLeft;              // 格式列表（可滚动）
         private FlowLayoutPanel _splitRight;    // 预设列表
-        private List<Button> _tabButtons = new List<Button>();
+        private List<Label> _tabLabels = new List<Label>();
+        private Panel _tabUnderline;
         private TextBox _searchBox;
+        private Panel _contentPanel;
 
         /// <summary>Chosen preset (read after DialogResult.OK).</summary>
         public PresetOption SelectedPreset { get; private set; }
@@ -59,9 +61,8 @@ namespace VideoConverter
             var tabPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 46,
-                BackColor = Color.White,
-                Padding = new Padding(12, 10, 12, 0)
+                Height = 44,
+                BackColor = Color.White
             };
             this.Controls.Add(tabPanel);
 
@@ -69,42 +70,57 @@ namespace VideoConverter
             tabs.AddRange(PresetDataStore.Categories);
             tabs.Add("自定义");
 
-            int x = 12;
+            int x = 16;
             foreach (var tab in tabs)
             {
-                var btn = new Button
+                var lbl = new Label
                 {
                     Text = tab,
-                    Location = new Point(x, 8),
-                    Size = new Size(TextRenderer.MeasureText(tab, this.Font).Width + 22, 28),
-                    FlatStyle = FlatStyle.Flat,
-                    BackColor = Color.White,
+                    Location = new Point(x, 10),
+                    AutoSize = true,
+                    Cursor = Cursors.Hand,
+                    BackColor = Color.Transparent,
                     ForeColor = Color.FromArgb(80, 80, 80),
-                    Font = new Font("Microsoft YaHei UI", 9F),
+                    Font = new Font("Microsoft YaHei UI", 9.75F),
                     Tag = tab
                 };
-                btn.FlatAppearance.BorderSize = 0;
-                btn.Click += TabButton_Click;
-                tabPanel.Controls.Add(btn);
-                _tabButtons.Add(btn);
-                x += btn.Width + 4;
+                lbl.Click += TabLabel_Click;
+                tabPanel.Controls.Add(lbl);
+                _tabLabels.Add(lbl);
+                x += lbl.Width + 22;
             }
+
+            _tabUnderline = new Panel
+            {
+                Height = 3,
+                BackColor = Color.FromArgb(124, 77, 255),
+                Visible = false
+            };
+            tabPanel.Controls.Add(_tabUnderline);
         }
 
-        private void TabButton_Click(object sender, EventArgs e)
+        private void TabLabel_Click(object sender, EventArgs e)
         {
-            SelectTab((string)((Button)sender).Tag);
+            SelectTab((string)((Label)sender).Tag);
         }
 
         private void SelectTab(string tab)
         {
             _selectedTab = tab;
-            foreach (var btn in _tabButtons)
+            Label activeLabel = null;
+            foreach (var lbl in _tabLabels)
             {
-                bool active = (string)btn.Tag == tab;
-                btn.BackColor = active ? Color.FromArgb(124, 77, 255) : Color.White;
-                btn.ForeColor = active ? Color.White : Color.FromArgb(80, 80, 80);
-                btn.Font = new Font("Microsoft YaHei UI", 9F, active ? FontStyle.Bold : FontStyle.Regular);
+                bool active = (string)lbl.Tag == tab;
+                lbl.ForeColor = active ? Color.FromArgb(124, 77, 255) : Color.FromArgb(80, 80, 80);
+                lbl.Font = new Font("Microsoft YaHei UI", 9.75F, active ? FontStyle.Bold : FontStyle.Regular);
+                if (active) activeLabel = lbl;
+            }
+
+            if (activeLabel != null)
+            {
+                _tabUnderline.Width = activeLabel.Width;
+                _tabUnderline.Location = new Point(activeLabel.Left, activeLabel.Bottom + 4);
+                _tabUnderline.Visible = true;
             }
 
             bool split = tab != "最近使用" && tab != "自定义";
@@ -125,15 +141,14 @@ namespace VideoConverter
             var searchPanel = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 36,
-                BackColor = Color.White,
-                Padding = new Padding(12, 4, 12, 4)
+                Height = 40,
+                BackColor = Color.White
             };
             this.Controls.Add(searchPanel);
 
             _searchBox = new TextBox
             {
-                Location = new Point(searchPanel.Width - 180 - 12, 6),
+                Location = new Point(searchPanel.Width - 180 - 16, 8),
                 Size = new Size(180, 24),
                 Anchor = AnchorStyles.Top | AnchorStyles.Right,
                 BorderStyle = BorderStyle.FixedSingle,
@@ -162,6 +177,14 @@ namespace VideoConverter
         // ---------------------------------------------------------------- //
         private void BuildBody()
         {
+            _contentPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.FromArgb(248, 246, 252),
+                Padding = new Padding(0)
+            };
+            this.Controls.Add(_contentPanel);
+
             // 单列列表（最近使用 / 自定义）
             _singleList = new FlowLayoutPanel
             {
@@ -170,11 +193,11 @@ namespace VideoConverter
                 BackColor = Color.FromArgb(248, 246, 252),
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
-                Padding = new Padding(14, 14, 14, 14)
+                Padding = new Padding(16, 20, 16, 16)
             };
-            this.Controls.Add(_singleList);
+            _contentPanel.Controls.Add(_singleList);
 
-            // 右侧预设列表（先加，Dock Fill）
+            // 右侧预设列表（Dock Fill）
             _splitRight = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -182,21 +205,20 @@ namespace VideoConverter
                 BackColor = Color.FromArgb(248, 246, 252),
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
-                Padding = new Padding(14, 14, 14, 14)
+                Padding = new Padding(16, 16, 16, 16)
             };
-            this.Controls.Add(_splitRight);
+            _contentPanel.Controls.Add(_splitRight);
 
-            // 左侧格式列表（后加，Dock Left 预留宽度）
+            // 左侧格式列表（Dock Left）
             _splitLeft = new Panel
             {
                 Dock = DockStyle.Left,
                 Width = 172,
                 BackColor = Color.White,
-                BorderStyle = BorderStyle.FixedSingle,
                 AutoScroll = true,
-                Padding = new Padding(6, 6, 6, 6)
+                Padding = new Padding(8, 12, 8, 12)
             };
-            this.Controls.Add(_splitLeft);
+            _contentPanel.Controls.Add(_splitLeft);
         }
 
         private void RefreshCurrent()
@@ -245,26 +267,28 @@ namespace VideoConverter
             if (!PresetDataStore.FormatsByCategory.ContainsKey(category)) return;
             var formats = PresetDataStore.FormatsByCategory[category];
 
-            int y = 6;
+            int y = 12;
             foreach (var fmt in formats)
             {
                 var btn = new Button
                 {
-                    Location = new Point(6, y),
-                    Size = new Size(150, 30),
-                    Text = fmt.Title,
+                    Location = new Point(8, y),
+                    Size = new Size(144, 40),
+                    Text = "   " + fmt.Title,
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.White,
                     ForeColor = Color.FromArgb(70, 70, 70),
-                    Font = new Font("Microsoft YaHei UI", 9F),
+                    Font = new Font("Microsoft YaHei UI", 9.5F),
                     TextAlign = ContentAlignment.MiddleLeft,
-                    Padding = new Padding(10, 0, 0, 0),
-                    Tag = fmt.FormatId
+                    Padding = new Padding(32, 0, 0, 0),
+                    Tag = fmt.FormatId,
+                    ImageAlign = ContentAlignment.MiddleLeft
                 };
                 btn.FlatAppearance.BorderSize = 0;
+                btn.Paint += (s, e) => DrawFormatIcon(e.Graphics, fmt.Title, btn);
                 btn.Click += (s, e) => SelectFormat((string)btn.Tag, btn);
                 _splitLeft.Controls.Add(btn);
-                y += 36;
+                y += 44;
             }
 
             if (formats.Count > 0)
@@ -300,11 +324,10 @@ namespace VideoConverter
         // ---------------------------------------------------------------- //
         private Panel BuildPresetRow(PresetOption p, bool showCategory, bool showDelete)
         {
-            int usable = showCategory
-                ? Math.Max(600, this.ClientSize.Width - 60)
-                : Math.Max(340, this.ClientSize.Width - 172 - 60);
-            int rowW = usable;
-            int rowH = 44;
+            int rowW = showCategory
+                ? Math.Max(600, _contentPanel.ClientSize.Width - 48)
+                : Math.Max(340, _contentPanel.ClientSize.Width - _splitLeft.Width - 48);
+            int rowH = 48;
 
             var panel = new Panel
             {
@@ -316,12 +339,24 @@ namespace VideoConverter
             };
 
             int x = 12;
+
+            // 小图标
+            var iconBox = new PictureBox
+            {
+                Location = new Point(x, 14),
+                Size = new Size(20, 20),
+                BackColor = Color.Transparent
+            };
+            iconBox.Paint += (s, e) => DrawPresetIcon(e.Graphics, p.Category, iconBox.ClientRectangle);
+            panel.Controls.Add(iconBox);
+            x += 28;
+
             if (showCategory)
             {
                 var chip = new Label
                 {
-                    Location = new Point(x, 12),
-                    Size = new Size(64, 20),
+                    Location = new Point(x, 13),
+                    Size = new Size(64, 22),
                     Text = p.Category ?? "",
                     BackColor = Color.FromArgb(237, 232, 248),
                     ForeColor = Color.FromArgb(90, 60, 160),
@@ -335,7 +370,7 @@ namespace VideoConverter
 
             panel.Controls.Add(new Label
             {
-                Location = new Point(x, 12),
+                Location = new Point(x, 14),
                 Size = new Size(220, 20),
                 Text = p.Name ?? "",
                 Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold),
@@ -346,7 +381,7 @@ namespace VideoConverter
 
             panel.Controls.Add(new Label
             {
-                Location = new Point(x, 12),
+                Location = new Point(x, 14),
                 Size = new Size(170, 20),
                 Text = p.ResolutionLabel ?? "自动",
                 Font = new Font("Microsoft YaHei UI", 9F),
@@ -358,13 +393,14 @@ namespace VideoConverter
             {
                 var btnDel = new Button
                 {
-                    Location = new Point(rowW - 40, 8),
+                    Location = new Point(rowW - 42, 10),
                     Size = new Size(28, 28),
                     Text = "🗑",
                     FlatStyle = FlatStyle.Flat,
                     BackColor = Color.Transparent,
                     ForeColor = Color.FromArgb(180, 80, 80),
-                    Font = new Font("Microsoft YaHei UI", 9F)
+                    Font = new Font("Microsoft YaHei UI", 9F),
+                    Cursor = Cursors.Hand
                 };
                 btnDel.FlatAppearance.BorderSize = 0;
                 btnDel.Click += (s, e) => OnDelete(p);
@@ -389,10 +425,11 @@ namespace VideoConverter
             return new Label
             {
                 Text = text,
-                Size = new Size(Math.Max(400, this.ClientSize.Width - 60), 30),
+                Size = new Size(Math.Max(400, _contentPanel.ClientSize.Width - 60), 30),
                 Font = new Font("Microsoft YaHei UI", 9.5F),
                 ForeColor = Color.FromArgb(150, 150, 150),
-                BackColor = Color.Transparent
+                BackColor = Color.Transparent,
+                Margin = new Padding(12, 20, 12, 0)
             };
         }
 
@@ -430,6 +467,9 @@ namespace VideoConverter
             RefreshCurrent();
         }
 
+        // ---------------------------------------------------------------- //
+        //  Drawing helpers
+        // ---------------------------------------------------------------- //
         private void DrawRounded(Label label, int radius)
         {
             label.Paint += (s, e) =>
@@ -447,6 +487,97 @@ namespace VideoConverter
                     label.Region = new Region(path);
                 }
             };
+        }
+
+        private void DrawFormatIcon(Graphics g, string formatTitle, Button host)
+        {
+            var bounds = new Rectangle(8, 10, 20, 20);
+            var (back, fore) = FormatColor(formatTitle);
+            using (var path = RoundedRect(bounds, 5))
+            {
+                using (var brush = new SolidBrush(back))
+                    g.FillPath(brush, path);
+            }
+            string text = GetFormatAbbreviation(formatTitle);
+            using (var brush = new SolidBrush(fore))
+            using (var font = new Font("Microsoft YaHei UI", 7F, FontStyle.Bold))
+            {
+                var size = g.MeasureString(text, font);
+                g.DrawString(text, font, brush,
+                    bounds.X + (bounds.Width - size.Width) / 2,
+                    bounds.Y + (bounds.Height - size.Height) / 2);
+            }
+        }
+
+        private void DrawPresetIcon(Graphics g, string category, Rectangle bounds)
+        {
+            var (back, fore) = CategoryColor(category);
+            using (var path = RoundedRect(bounds, 5))
+            {
+                using (var brush = new SolidBrush(back))
+                    g.FillPath(brush, path);
+            }
+            using (var brush = new SolidBrush(fore))
+            using (var font = new Font("Microsoft YaHei UI", 8F, FontStyle.Bold))
+            {
+                var size = g.MeasureString("▶", font);
+                g.DrawString("▶", font, brush,
+                    bounds.X + (bounds.Width - size.Width) / 2,
+                    bounds.Y + (bounds.Height - size.Height) / 2);
+            }
+        }
+
+        private GraphicsPath RoundedRect(Rectangle rect, int radius)
+        {
+            var path = new GraphicsPath();
+            int r = radius;
+            int w = rect.Width - 1;
+            int h = rect.Height - 1;
+            path.AddArc(rect.X, rect.Y, r * 2, r * 2, 180, 90);
+            path.AddArc(rect.X + w - r * 2, rect.Y, r * 2, r * 2, 270, 90);
+            path.AddArc(rect.X + w - r * 2, rect.Y + h - r * 2, r * 2, r * 2, 0, 90);
+            path.AddArc(rect.X, rect.Y + h - r * 2, r * 2, r * 2, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+        private string GetFormatAbbreviation(string title)
+        {
+            if (string.IsNullOrEmpty(title)) return "?";
+            var upper = title.ToUpperInvariant();
+            if (upper.Contains("MP4")) return "MP4";
+            if (upper.Contains("MKV")) return "MKV";
+            if (upper.Contains("MOV")) return "MOV";
+            if (upper.Contains("AVI")) return "AVI";
+            if (upper.Contains("HEVC") || upper.Contains("H.265")) return "HVC";
+            if (upper.Contains("AVC") || upper.Contains("H.264")) return "AVC";
+            if (upper.Contains("PRORES")) return "PRO";
+            if (upper.Contains("CINEFORM")) return "CIN";
+            if (title.Length >= 3) return title.Substring(0, 3).ToUpperInvariant();
+            return title.ToUpperInvariant();
+        }
+
+        private (Color back, Color fore) FormatColor(string title)
+        {
+            var upper = (title ?? "").ToUpperInvariant();
+            if (upper.Contains("MP4")) return (Color.FromArgb(124, 77, 255), Color.White);
+            if (upper.Contains("MKV")) return (Color.FromArgb(77, 124, 255), Color.White);
+            if (upper.Contains("MOV")) return (Color.FromArgb(255, 124, 77), Color.White);
+            if (upper.Contains("AVI")) return (Color.FromArgb(77, 200, 170), Color.White);
+            if (upper.Contains("HEVC")) return (Color.FromArgb(100, 80, 200), Color.White);
+            if (upper.Contains("PRORES")) return (Color.FromArgb(220, 100, 150), Color.White);
+            return (Color.FromArgb(160, 140, 220), Color.White);
+        }
+
+        private (Color back, Color fore) CategoryColor(string category)
+        {
+            var c = category ?? "";
+            if (c.Contains("视频")) return (Color.FromArgb(230, 220, 255), Color.FromArgb(124, 77, 255));
+            if (c.Contains("音频")) return (Color.FromArgb(220, 235, 255), Color.FromArgb(77, 124, 255));
+            if (c.Contains("图像")) return (Color.FromArgb(255, 230, 220), Color.FromArgb(255, 124, 77));
+            if (c.Contains("设备")) return (Color.FromArgb(220, 255, 235), Color.FromArgb(60, 180, 120));
+            if (c.Contains("网络")) return (Color.FromArgb(255, 240, 220), Color.FromArgb(220, 150, 50));
+            return (Color.FromArgb(237, 232, 248), Color.FromArgb(124, 77, 255));
         }
     }
 }
