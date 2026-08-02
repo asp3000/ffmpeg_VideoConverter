@@ -1004,11 +1004,12 @@ namespace VideoConverter
         /// </summary>
         private string GetHardwareEncoderFor(ConversionTask task)
         {
-            if (!hardwareCheck.Checked || _hwSupport == null || !_hwSupport.Any) return null;
-            string sw = task.Preset?.VideoCodec;
-            if (string.IsNullOrEmpty(sw)) return null;
-            FFmpegHelper.TryGetHardwareEncoder(sw, _hwSupport, out string hw);
-            return hw;
+            // 当“硬件编码”勾选且检测到支持时，解析为对应厂商的 GPU 编码器；
+            // 否则（未勾选或不支持）回退为 CPU 编码器。#65
+            var hw = (hardwareCheck.Checked && _hwSupport != null && _hwSupport.Any) ? _hwSupport : null;
+            string resolved = FFmpegHelper.ResolveVideoEncoder(task.Preset?.VideoCodec, hw);
+            if (string.Equals(resolved, "copy", StringComparison.OrdinalIgnoreCase)) return null;
+            return resolved;
         }
 
         #endregion

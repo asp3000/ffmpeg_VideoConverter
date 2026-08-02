@@ -29,6 +29,7 @@ namespace VideoConverter
         private ComboBox cmbChannel;
         private ComboBox cmbSampleRate;
         private ComboBox cmbAudioBitrate;
+        private TextBox txtCustomArgs;
         private CheckBox chkSaveAsNew;
         private Button btnSave;
         private Button btnCancel;
@@ -116,6 +117,22 @@ namespace VideoConverter
             cmbAudioBitrate = CreateDropDown(340, y, dropW, dropH);
             y += padY + 16;
 
+            // Custom parameters (advanced ffmpeg args)
+            var lblCustom = new Label
+            {
+                Text = "自定义参数",
+                Location = new Point(16, y + 2),
+                Size = new Size(70, 20),
+                ForeColor = Color.Gray
+            };
+            txtCustomArgs = new TextBox
+            {
+                Location = new Point(90, y),
+                Size = new Size(410, 24),
+                Font = new Font("Microsoft YaHei UI", 9F)
+            };
+            y += 40;
+
             // Save as new preset checkbox
             chkSaveAsNew = new CheckBox
             {
@@ -177,6 +194,8 @@ namespace VideoConverter
             this.Controls.Add(cmbSampleRate);
             this.Controls.Add(lblAbr);
             this.Controls.Add(cmbAudioBitrate);
+            this.Controls.Add(lblCustom);
+            this.Controls.Add(txtCustomArgs);
             this.Controls.Add(chkSaveAsNew);
             this.Controls.Add(btnSave);
             this.Controls.Add(btnCancel);
@@ -220,6 +239,7 @@ namespace VideoConverter
                 LoadCombo(cmbAudioBitrate, _options.AudioBitrates, Preset.AudioBitrate, "自动");
 
                 txtTitle.Text = Preset.Name ?? "";
+                txtCustomArgs.Text = Preset.CustomArgs ?? "";
 
                 // Built-in presets cannot be overwritten; force "另存为" semantics.
                 if (Preset.IsBuiltIn)
@@ -273,7 +293,7 @@ namespace VideoConverter
         /// </summary>
         private void MergeFallback(FormatOptions o, PresetOption p)
         {
-            EnsureValue(o.VideoCodecs, p.VideoCodec, p.VideoCodec);
+            EnsureValue(o.VideoCodecs, p.VideoCodec, p.VideoCodecLabel ?? p.VideoCodec);
             EnsureValue(o.AudioCodecs, p.AudioCodec, p.AudioCodec);
             EnsureValue(o.Resolutions, p.ResolutionValue, p.ResolutionLabel);
             EnsureValue(o.FrameRates, p.FrameRate, p.FrameRate + " fps");
@@ -325,6 +345,8 @@ namespace VideoConverter
                 }
 
                 Preset.VideoCodec = GetComboValue(cmbVideoCodec, "copy");
+                var vitem = cmbVideoCodec.SelectedItem as OptionItem;
+                Preset.VideoCodecLabel = (cmbVideoCodec.SelectedIndex > 0 && vitem != null) ? vitem.Label : null;
                 Preset.ResolutionValue = GetComboValue(cmbResolution, null);
                 Preset.ResolutionLabel = string.IsNullOrEmpty(Preset.ResolutionValue)
                     ? "与源文件相同"
@@ -338,6 +360,7 @@ namespace VideoConverter
                     Preset.Channels = 0;
                 Preset.SampleRate = GetComboValue(cmbSampleRate, null);
                 Preset.AudioBitrate = GetComboValue(cmbAudioBitrate, null);
+                Preset.CustomArgs = txtCustomArgs.Text.Trim();
             }
             catch (Exception ex)
             {

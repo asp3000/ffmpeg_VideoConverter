@@ -308,7 +308,16 @@ namespace VideoConverter
         public string Category { get; set; }
         public string Extension { get; set; }
         public string VideoCodec { get; set; }
+        /// <summary>
+        /// Logical codec family (fourCC, e.g. "H264"). The preset editor shows
+        /// <see cref="VideoCodecLabel"/>; the concrete CPU/GPU encoder is resolved
+        /// at conversion time via FFmpegHelper.ResolveVideoEncoder based on the
+        /// hardware-encoding setting. #65
+        /// </summary>
+        public string VideoCodecLabel { get; set; }
         public string AudioCodec { get; set; }
+        /// <summary>Extra raw ffmpeg parameters appended to the command (advanced). #65</summary>
+        public string CustomArgs { get; set; }
         public string ResolutionLabel { get; set; }
         public string ResolutionValue { get; set; }   // e.g. 1920x1080
         public string VideoBitrate { get; set; }
@@ -362,7 +371,8 @@ namespace VideoConverter
             Name = "MP4 4K",
             FormatName = "MP4",
             Extension = ".mp4",
-            VideoCodec = "libx264",
+            VideoCodec = "H264",
+            VideoCodecLabel = "H.264",
             AudioCodec = "aac",
             ResolutionLabel = "3840 x 2160",
             ResolutionValue = "3840x2160",
@@ -377,7 +387,8 @@ namespace VideoConverter
             Name = "MP4 1080",
             FormatName = "MP4",
             Extension = ".mp4",
-            VideoCodec = "libx264",
+            VideoCodec = "H264",
+            VideoCodecLabel = "H.264",
             AudioCodec = "aac",
             ResolutionLabel = "1920 x 1080",
             ResolutionValue = "1920x1080",
@@ -392,7 +403,8 @@ namespace VideoConverter
             Name = "MP4 720P",
             FormatName = "MP4",
             Extension = ".mp4",
-            VideoCodec = "libx264",
+            VideoCodec = "H264",
+            VideoCodecLabel = "H.264",
             AudioCodec = "aac",
             ResolutionLabel = "1280 x 720",
             ResolutionValue = "1280x720",
@@ -407,7 +419,8 @@ namespace VideoConverter
             Name = "MP4 480P",
             FormatName = "MP4",
             Extension = ".mp4",
-            VideoCodec = "libx264",
+            VideoCodec = "H264",
+            VideoCodecLabel = "H.264",
             AudioCodec = "aac",
             ResolutionLabel = "854 x 480",
             ResolutionValue = "854x480",
@@ -422,7 +435,8 @@ namespace VideoConverter
             Name = "AVI Xvid",
             FormatName = "AVI",
             Extension = ".avi",
-            VideoCodec = "libxvid",
+            VideoCodec = "XVID",
+            VideoCodecLabel = "Xvid (MPEG-4)",
             AudioCodec = "mp3",
             ResolutionLabel = "1920 x 1080",
             ResolutionValue = "1920x1080",
@@ -437,7 +451,8 @@ namespace VideoConverter
             Name = "MKV H.264",
             FormatName = "MKV",
             Extension = ".mkv",
-            VideoCodec = "libx264",
+            VideoCodec = "H264",
+            VideoCodecLabel = "H.264",
             AudioCodec = "aac",
             ResolutionLabel = "1920 x 1080",
             ResolutionValue = "1920x1080",
@@ -452,7 +467,8 @@ namespace VideoConverter
             Name = "MOV H.264",
             FormatName = "MOV",
             Extension = ".mov",
-            VideoCodec = "libx264",
+            VideoCodec = "H264",
+            VideoCodecLabel = "H.264",
             AudioCodec = "aac",
             ResolutionLabel = "1920 x 1080",
             ResolutionValue = "1920x1080",

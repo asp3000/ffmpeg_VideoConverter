@@ -86,6 +86,29 @@ namespace VideoConverter
         }
 
         /// <summary>
+        /// Resolve a logical codec family (fourCC, e.g. "H264") to the concrete
+        /// ffmpeg encoder to use. When <paramref name="hw"/> indicates hardware
+        /// encoding is enabled and a GPU encoder exists for the detected vendor,
+        /// the GPU encoder is returned (e.g. "h264_nvenc"); otherwise the CPU
+        /// encoder is returned (e.g. "libx264"). This is the single place where
+        /// the "H264 → CPU/GPU" decision is made. #65
+        /// </summary>
+        public static string ResolveVideoEncoder(string fourCC, HardwareSupport hw)
+        {
+            if (string.IsNullOrEmpty(fourCC) || string.Equals(fourCC, "copy", StringComparison.OrdinalIgnoreCase))
+                return fourCC;
+
+            string cpu = PresetDataStore.GetCpuEncoder(fourCC);
+            if (hw != null && hw.Any && HardwareEncoderMap.TryGetValue(cpu ?? string.Empty, out var vendors))
+            {
+                if (hw.Nvidia && vendors.TryGetValue(HardwareVendor.Nvidia, out var n)) return n;
+                if (hw.Intel && vendors.TryGetValue(HardwareVendor.Intel, out var i)) return i;
+                if (hw.Amd && vendors.TryGetValue(HardwareVendor.Amd, out var a)) return a;
+            }
+            return cpu;
+        }
+
+        /// <summary>
         /// Probe ffmpeg for the hardware encoders it was compiled with. A codec
         /// name such as h264_nvenc only appears when that vendor's encoder is
         /// present in the build.
@@ -605,6 +628,10 @@ namespace VideoConverter
                     sb.Append(" -sn");
             }
 
+            // 自定义参数（高级）：直接附加到命令行末尾。#65
+            if (p != null && !string.IsNullOrWhiteSpace(p.CustomArgs))
+                sb.Append(" " + p.CustomArgs.Trim());
+
             sb.AppendFormat(" \"{0}\"", outputPath);
             return sb.ToString();
         }
@@ -748,6 +775,10 @@ namespace VideoConverter
                 else
                     sb.Append(" -sn");
             }
+
+            // 自定义参数（高级）：直接附加到命令行末尾。#65
+            if (p != null && !string.IsNullOrWhiteSpace(p.CustomArgs))
+                sb.Append(" " + p.CustomArgs.Trim());
 
             sb.AppendFormat(" \"{0}\"", outputPath);
             return sb.ToString();

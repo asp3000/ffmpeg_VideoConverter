@@ -222,6 +222,7 @@ namespace VideoConverter
                     Category = format.Category,
                     Extension = ext,
                     VideoCodec = "copy",
+                    VideoCodecLabel = "与源文件相同",
                     AudioCodec = "copy",
                     ResolutionLabel = "与源文件相同",
                     ResolutionValue = null,
@@ -245,7 +246,8 @@ namespace VideoConverter
                 FormatName = format.Title,
                 Category = format.Category,
                 Extension = ext,
-                VideoCodec = ResolveVideoEncoder(p.videoCodec, fmtOpt),
+                VideoCodec = p.videoCodec,            // logical family (fourCC)
+                VideoCodecLabel = ResolveVideoLabel(p.videoCodec, fmtOpt),
                 AudioCodec = ResolveAudioEncoder(p.audioCodec, fmtOpt),
                 ResolutionLabel = w > 0 && h > 0 ? string.Format("{0} x {1}", w, h) : "与源文件相同",
                 ResolutionValue = w > 0 && h > 0 ? string.Format("{0}x{1}", w, h) : null,
@@ -272,6 +274,28 @@ namespace VideoConverter
             var c = FindCodec(fourCC, fmt?.videoCodecs, VideoCodecIndex);
             if (c != null) return c.encoder;
             return string.IsNullOrEmpty(fourCC) ? "copy" : fourCC.ToLowerInvariant();
+        }
+
+        /// <summary>Friendly codec name for a fourCC (used by the preset editor UI).</summary>
+        private static string ResolveVideoLabel(string fourCC, FormatOptionJson fmt)
+        {
+            var c = FindCodec(fourCC, fmt?.videoCodecs, VideoCodecIndex);
+            if (c != null) return string.IsNullOrEmpty(c.label) ? (c.encoder ?? fourCC) : c.label;
+            return fourCC;
+        }
+
+        /// <summary>
+        /// Resolve a logical codec family (fourCC) to its concrete CPU ffmpeg
+        /// encoder. Falls back to the lower-cased fourCC for unknown codecs. #65
+        /// </summary>
+        public static string GetCpuEncoder(string fourCC)
+        {
+            if (string.IsNullOrEmpty(fourCC) || string.Equals(fourCC, "copy", StringComparison.OrdinalIgnoreCase))
+                return fourCC;
+            var c = FindCodec(fourCC, null, VideoCodecIndex);
+            return (c != null && !string.IsNullOrEmpty(c.encoder))
+                ? c.encoder
+                : fourCC.ToLowerInvariant();
         }
 
         private static string ResolveAudioEncoder(string fourCC, FormatOptionJson fmt)
@@ -323,10 +347,12 @@ namespace VideoConverter
                 FormatSpecs.TryGetValue(formatId, out fmt);
 
             // ---- layer 3: codecs specific to this container ----
+            // Video codec value = logical fourCC (e.g. "H264"); label = friendly
+            // name only ("H.264"), never the concrete encoder ("libx264"). #65
             if (fmt?.videoCodecs != null)
                 foreach (var c in fmt.videoCodecs)
-                    if (c != null && !string.IsNullOrEmpty(c.encoder))
-                        result.VideoCodecs.Add(new OptionItem(c.encoder, BuildCodecLabel(c)));
+                    if (c != null && !string.IsNullOrEmpty(c.fourCC))
+                        result.VideoCodecs.Add(new OptionItem(c.fourCC, BuildCodecLabel(c)));
 
             if (fmt?.audioCodecs != null)
                 foreach (var c in fmt.audioCodecs)
@@ -373,10 +399,10 @@ namespace VideoConverter
 
         private static string BuildCodecLabel(CodecJson c)
         {
+            // Show only the friendly name (e.g. "H.264"), never the concrete
+            // encoder (e.g. "libx264"). #65
             if (string.IsNullOrEmpty(c.label)) return c.encoder;
-            return string.Equals(c.label, c.encoder, StringComparison.OrdinalIgnoreCase)
-                ? c.label
-                : c.label + " (" + c.encoder + ")";
+            return c.label;
         }
 
         /// <summary>23.97 -> "23.97", 30.0 -> "30" (invariant, ffmpeg-safe).</summary>
@@ -455,6 +481,7 @@ namespace VideoConverter
         formatName = p.FormatName,
         extension = p.Extension,
         videoCodec = p.VideoCodec,
+        videoCodecLabel = p.VideoCodecLabel,
         audioCodec = p.AudioCodec,
         resolutionLabel = p.ResolutionLabel,
         resolutionValue = p.ResolutionValue,
@@ -482,6 +509,8 @@ namespace VideoConverter
         SampleRate = j.sampleRate,
         Channels = j.channels,
         FormatId = j.formatId,
+        VideoCodecLabel = j.videoCodecLabel,
+        CustomArgs = j.customArgs,
         IsBuiltIn = false,
         KeepSource = false,
         PresetId = null,
@@ -615,6 +644,7 @@ namespace VideoConverter
         [DataMember] public string formatName { get; set; }
         [DataMember] public string extension { get; set; }
         [DataMember] public string videoCodec { get; set; }
+        [DataMember] public string videoCodecLabel { get; set; }
         [DataMember] public string audioCodec { get; set; }
         [DataMember] public string resolutionLabel { get; set; }
         [DataMember] public string resolutionValue { get; set; }
@@ -624,6 +654,7 @@ namespace VideoConverter
         [DataMember] public string sampleRate { get; set; }
         [DataMember] public int channels { get; set; }
         [DataMember] public string formatId { get; set; }
+        [DataMember] public string customArgs { get; set; }
     }
 
     #endregion
