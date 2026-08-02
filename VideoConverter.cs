@@ -866,9 +866,17 @@ namespace VideoConverter
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     task.Preset = dlg.Preset;
+                    RegisterCustomIfNeeded(dlg.Preset);
                     RefreshPresetButton(presetButton, task, lblFormat, lblResolution, lblSize);
                 }
             }
+        }
+
+        /// <summary>若编辑结果是自定义预设，则登记到 PresetDataStore 以便在“自定义”页签显示。</summary>
+        private void RegisterCustomIfNeeded(PresetOption preset)
+        {
+            if (preset != null && !preset.IsBuiltIn)
+                PresetDataStore.AddCustom(preset);
         }
 
         private void RefreshPresetButton(Button presetButton, ConversionTask task, Label lblFormat, Label lblResolution, Label lblSize)
@@ -1066,6 +1074,7 @@ namespace VideoConverter
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     _globalPreset = dlg.Preset;
+                    RegisterCustomIfNeeded(dlg.Preset);
                     UpdateConvertToDisplay();
                     await ApplyGlobalPresetToAll();
                 }

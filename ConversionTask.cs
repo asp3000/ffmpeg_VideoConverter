@@ -304,6 +304,8 @@ namespace VideoConverter
     {
         public string Name { get; set; }
         public string FormatName { get; set; }
+        /// <summary>顶层类别（视频/音频/图像/设备/网络视频），用于自定义与最近列表分组显示。</summary>
+        public string Category { get; set; }
         public string Extension { get; set; }
         public string VideoCodec { get; set; }
         public string AudioCodec { get; set; }

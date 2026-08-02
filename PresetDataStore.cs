@@ -81,6 +81,9 @@ namespace VideoConverter
         /// <summary>Recently selected presets (max 20).</summary>
         public static List<PresetOption> RecentPresets { get; private set; } = new List<PresetOption>();
 
+        /// <summary>User-defined presets (saved to custom_presets.json).</summary>
+        public static List<PresetOption> CustomPresets { get; private set; } = new List<PresetOption>();
+
         public static void AddRecent(PresetOption preset)
         {
             if (preset == null) return;
@@ -88,6 +91,7 @@ namespace VideoConverter
             RecentPresets.Insert(0, preset.Clone());
             if (RecentPresets.Count > 20)
                 RecentPresets.RemoveAt(RecentPresets.Count - 1);
+            SaveRecent();
         }
 
         // ------------------------------------------------------------------ //
@@ -103,6 +107,8 @@ namespace VideoConverter
             Common = new CommonOptionsJson();
             VideoCodecIndex.Clear();
             AudioCodecIndex.Clear();
+            RecentPresets = new List<PresetOption>();
+            CustomPresets = new List<PresetOption>();
 
             PresetsRoot presetsRoot = null;
 
@@ -129,6 +135,8 @@ namespace VideoConverter
             }
 
             BuildIndex(presetsRoot);
+            LoadRecent();
+            LoadCustom();
 
             // Array-shaped JSON never throws on shape mismatch, so treat "nothing
             // loaded" as a failure too — the caller falls back to built-in presets.
@@ -179,6 +187,7 @@ namespace VideoConverter
                         Title = fmt.title ?? string.Empty,
                         Icon = fmt.icon ?? string.Empty,
                         FormatId = fmt.formatId ?? string.Empty,
+                        Category = cat.name,
                     };
 
                     if (fmt.presets != null)
@@ -210,6 +219,7 @@ namespace VideoConverter
                 {
                     Name = p.name ?? string.Empty,
                     FormatName = format.Title,
+                    Category = format.Category,
                     Extension = ext,
                     VideoCodec = "copy",
                     AudioCodec = "copy",
@@ -233,6 +243,7 @@ namespace VideoConverter
             {
                 Name = p.name ?? string.Empty,
                 FormatName = format.Title,
+                Category = format.Category,
                 Extension = ext,
                 VideoCodec = ResolveVideoEncoder(p.videoCodec, fmtOpt),
                 AudioCodec = ResolveAudioEncoder(p.audioCodec, fmtOpt),
@@ -375,6 +386,119 @@ namespace VideoConverter
                 ? ((int)fps).ToString(CultureInfo.InvariantCulture)
                 : fps.ToString("0.###", CultureInfo.InvariantCulture);
         }
+    #region Custom & recent presets persistence
+
+    private static string UserDataPath(string fileName)
+    {
+        string baseDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+        if (string.IsNullOrEmpty(baseDir)) baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        return Path.Combine(baseDir, fileName);
+    }
+
+    /// <summary>Upsert a user preset into the custom list (matched by Name+Category).</summary>
+    public static void AddCustom(PresetOption preset)
+    {
+        if (preset == null) return;
+        string cat = string.IsNullOrEmpty(preset.Category) ? "视频" : preset.Category;
+        var clone = preset.Clone();
+        clone.Category = cat;
+        clone.IsBuiltIn = false;
+        clone.KeepSource = false;
+        clone.PresetId = null;
+        CustomPresets.RemoveAll(p => p.Name == clone.Name && p.Category == clone.Category);
+        CustomPresets.Add(clone);
+        SaveCustom();
+    }
+
+    /// <summary>Remove a user preset (matched by Name+Category).</summary>
+    public static void RemoveCustom(PresetOption preset)
+    {
+        if (preset == null) return;
+        CustomPresets.RemoveAll(p => p.Name == preset.Name && p.Category == preset.Category);
+        SaveCustom();
+    }
+
+    public static void LoadCustom()
+    {
+        CustomPresets = new List<PresetOption>();
+        var list = ReadJson<List<CustomPresetJson>>(UserDataPath("custom_presets.json"));
+        if (list != null)
+            foreach (var j in list)
+                if (j != null) CustomPresets.Add(FromCustomJson(j));
+    }
+
+    public static void SaveCustom()
+    {
+        try { WriteJson(UserDataPath("custom_presets.json"), CustomPresets.Select(ToCustomJson).ToList()); }
+        catch { }
+    }
+
+    public static void LoadRecent()
+    {
+        RecentPresets = new List<PresetOption>();
+        var list = ReadJson<List<CustomPresetJson>>(UserDataPath("recent_presets.json"));
+        if (list != null)
+            foreach (var j in list)
+                if (j != null) RecentPresets.Add(FromCustomJson(j));
+    }
+
+    public static void SaveRecent()
+    {
+        try { WriteJson(UserDataPath("recent_presets.json"), RecentPresets.Select(ToCustomJson).ToList()); }
+        catch { }
+    }
+
+    private static CustomPresetJson ToCustomJson(PresetOption p) => new CustomPresetJson
+    {
+        name = p.Name,
+        category = p.Category,
+        formatName = p.FormatName,
+        extension = p.Extension,
+        videoCodec = p.VideoCodec,
+        audioCodec = p.AudioCodec,
+        resolutionLabel = p.ResolutionLabel,
+        resolutionValue = p.ResolutionValue,
+        videoBitrate = p.VideoBitrate,
+        audioBitrate = p.AudioBitrate,
+        frameRate = p.FrameRate,
+        sampleRate = p.SampleRate,
+        channels = p.Channels,
+        formatId = p.FormatId
+    };
+
+    private static PresetOption FromCustomJson(CustomPresetJson j) => new PresetOption
+    {
+        Name = j.name,
+        Category = j.category,
+        FormatName = j.formatName,
+        Extension = j.extension,
+        VideoCodec = j.videoCodec,
+        AudioCodec = j.audioCodec,
+        ResolutionLabel = j.resolutionLabel,
+        ResolutionValue = j.resolutionValue,
+        VideoBitrate = j.videoBitrate,
+        AudioBitrate = j.audioBitrate,
+        FrameRate = j.frameRate,
+        SampleRate = j.sampleRate,
+        Channels = j.channels,
+        FormatId = j.formatId,
+        IsBuiltIn = false,
+        KeepSource = false,
+        PresetId = null,
+        FourCC = string.Empty
+    };
+
+    private static void WriteJson<T>(string path, T obj) where T : class
+    {
+        using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write))
+        {
+            var ser = new DataContractJsonSerializer(typeof(T));
+            ser.WriteObject(fs, obj);
+        }
+    }
+
+    #endregion
+
     }
 
     #region JSON data contracts — all containers are ARRAYS on purpose
@@ -483,6 +607,25 @@ namespace VideoConverter
         [DataMember] public string encoder { get; set; }
     }
 
+    [DataContract]
+    public class CustomPresetJson
+    {
+        [DataMember] public string name { get; set; }
+        [DataMember] public string category { get; set; }
+        [DataMember] public string formatName { get; set; }
+        [DataMember] public string extension { get; set; }
+        [DataMember] public string videoCodec { get; set; }
+        [DataMember] public string audioCodec { get; set; }
+        [DataMember] public string resolutionLabel { get; set; }
+        [DataMember] public string resolutionValue { get; set; }
+        [DataMember] public string videoBitrate { get; set; }
+        [DataMember] public string audioBitrate { get; set; }
+        [DataMember] public string frameRate { get; set; }
+        [DataMember] public string sampleRate { get; set; }
+        [DataMember] public int channels { get; set; }
+        [DataMember] public string formatId { get; set; }
+    }
+
     #endregion
 
     public class FormatEntry
@@ -491,6 +634,7 @@ namespace VideoConverter
         public string Title { get; set; }
         public string Icon { get; set; }
         public string FormatId { get; set; }
+        public string Category { get; set; }
         public List<PresetOption> Presets { get; set; } = new List<PresetOption>();
     }
 
