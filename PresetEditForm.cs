@@ -161,7 +161,7 @@ namespace VideoConverter
                 BackColor = Color.FromArgb(248, 246, 252),
                 ScrollBars = ScrollBars.Vertical,
                 Font = new Font("Consolas", 9F),
-                WordWrap = false
+                WordWrap = true
             };
             y += 76 + 14;
 
