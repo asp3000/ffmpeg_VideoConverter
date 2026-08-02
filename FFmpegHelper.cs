@@ -137,8 +137,8 @@ namespace VideoConverter
                 proc.Start();
                 ProcessGuard.Register(proc, tempFile);
 
-                string output = await Task.Run(() => proc.StandardOutput.ReadToEnd());
-                await tcs.Task;
+                string output = await Task.Run(() => proc.StandardOutput.ReadToEnd()).ConfigureAwait(false);
+                await tcs.Task.ConfigureAwait(false);
 
                 sup.Nvidia = output.IndexOf("nvenc", StringComparison.OrdinalIgnoreCase) >= 0;
                 sup.Intel = output.IndexOf("_qsv", StringComparison.OrdinalIgnoreCase) >= 0;
@@ -216,8 +216,8 @@ namespace VideoConverter
                 proc.Exited += (s, e) => tcs.TrySetResult(null);
                 proc.Start();
                 ProcessGuard.Register(proc, tempFile);
-                output = await Task.Run(() => proc.StandardOutput.ReadToEnd());
-                await tcs.Task;
+                output = await Task.Run(() => proc.StandardOutput.ReadToEnd()).ConfigureAwait(false);
+                await tcs.Task.ConfigureAwait(false);
             }
 
             return ParseFfprobeJson(output, filePath);
@@ -360,8 +360,8 @@ namespace VideoConverter
                 ProcessGuard.Register(proc, tempFile);
 
                 var msStream = new MemoryStream();
-                await proc.StandardOutput.BaseStream.CopyToAsync(msStream);
-                await tcs.Task;
+                await proc.StandardOutput.BaseStream.CopyToAsync(msStream).ConfigureAwait(false);
+                await tcs.Task.ConfigureAwait(false);
 
                 if (msStream.Length == 0) return null;
                 msStream.Position = 0;
@@ -399,8 +399,8 @@ namespace VideoConverter
                 proc.Start();
                 ProcessGuard.Register(proc, tempFile);
 
-                string output = await Task.Run(() => proc.StandardOutput.ReadToEnd());
-                await tcs.Task;
+                string output = await Task.Run(() => proc.StandardOutput.ReadToEnd()).ConfigureAwait(false);
+                await tcs.Task.ConfigureAwait(false);
 
                 foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
                 {
@@ -442,8 +442,8 @@ namespace VideoConverter
                 ProcessGuard.Register(proc, tempFile);
 
                 var ms = new MemoryStream();
-                await proc.StandardOutput.BaseStream.CopyToAsync(ms);
-                await tcs.Task;
+                await proc.StandardOutput.BaseStream.CopyToAsync(ms).ConfigureAwait(false);
+                await tcs.Task.ConfigureAwait(false);
 
                 if (ms.Length == 0) return null;
                 ms.Position = 0;
@@ -893,7 +893,7 @@ namespace VideoConverter
                     }
                 }, cancellationToken);
 
-                try { await tcs.Task; }
+                try { await tcs.Task.ConfigureAwait(false); }
                 finally
                 {
                     try { await Task.WhenAny(stderrReader, Task.Delay(1000)); } catch { }
