@@ -55,6 +55,18 @@ namespace VideoConverter
         /// </summary>
         public bool IsVC1Input { get; set; }
 
+        /// <summary>输入视频流 codec_name（ffprobe，小写，如 h264/wmv3）。高速智能 copy 判定用。</summary>
+        public string SourceVideoCodec { get; set; }
+
+        /// <summary>输入音频流 codec_name（ffprobe，如 aac/ac3）。高速智能 copy 判定用。</summary>
+        public string SourceAudioCodec { get; set; }
+
+        /// <summary>目标视频编码器（实际 ffmpeg 编码器名，含硬件解析/容器默认）。高速智能 copy 判定用。</summary>
+        public string TargetVideoEncoder { get; set; }
+
+        /// <summary>目标音频编码器（实际 ffmpeg 编码器名，含容器默认）。</summary>
+        public string TargetAudioEncoder { get; set; }
+
         // ---- source metadata ------------------------------------------------
         public string SourceFormat { get; set; }
         public string SourceResolution { get; set; }

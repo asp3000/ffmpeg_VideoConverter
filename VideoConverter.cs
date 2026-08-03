@@ -50,6 +50,7 @@ namespace VideoConverter
 
             // Load UniConverter preset database once (idempotent global cache). #43
             PresetDataStore.EnsureLoaded();
+            DefaultCodecSettings.EnsureLoaded();   // 自动码率默认值与容器默认编码（可手工编辑配置）
             if (!PresetDataStore.IsLoaded && PresetDataStore.LoadException != null)
             {
                 MessageBox.Show(this,
@@ -1157,16 +1158,15 @@ namespace VideoConverter
         }
 
         /// <summary>
-        /// High-speed mode applies only when the input and output containers are
-        /// identical (stream copy is only valid then). Otherwise the mode is not
-        /// used for that particular file and a normal encode is performed.
+        /// <summary>
+        /// High-speed mode: smart per-stream copy/transcode is enabled whenever the
+        /// 高速转换 checkbox is on. Video/audio streams are copied only when the
+        /// input codec equals the target codec, otherwise re-encoded with the
+        /// target codec + auto defaults (see FFmpegHelper.AppendSmartCopyStreams).
         /// </summary>
         private bool AppliesStreamCopy(ConversionTask task)
         {
-            if (!highSpeedCheck.Checked) return false;
-            string inExt = Path.GetExtension(task.InputPath).ToLowerInvariant();
-            string outExt = (task.Preset?.Extension ?? ".mp4").ToLowerInvariant();
-            return inExt == outExt && inExt.Length > 0;
+            return highSpeedCheck.Checked;
         }
 
         /// <summary>
@@ -1374,13 +1374,20 @@ namespace VideoConverter
             if (card == null) return;
             if (task.Status == TaskStatus.Converting) return;
 
-            // 转换前检测输入是否为 VC-1（WMV），是则注入容错参数。#74
-            try { task.IsVC1Input = await FFmpegHelper.DetectVC1InputAsync(task.InputPath); }
-            catch { task.IsVC1Input = false; }
+            // 转换前一次 ffprobe 探测：源视频/音频编码（智能 copy 判定）+ VC-1 容错。#74
+            MediaInfo srcInfo = null;
+            try { srcInfo = await FFmpegHelper.ProbeDetailedAsync(task.InputPath); }
+            catch { }
+            task.SourceVideoCodec = srcInfo?.VideoCodec;
+            task.SourceAudioCodec = task.SelectedAudioTrack?.Codec
+                ?? srcInfo?.AudioTracks?.FirstOrDefault()?.Codec;
+            task.IsVC1Input = FFmpegHelper.IsVC1Codec(srcInfo?.VideoCodec);
 
             // Decide per-task conversion mode.
             task.UseStreamCopy = AppliesStreamCopy(task);
             task.HardwareEncoder = GetHardwareEncoderFor(task);
+            task.TargetVideoEncoder = FFmpegHelper.ResolveTargetVideoEncoder(task, _hwSupport, hardwareCheck.Checked);
+            task.TargetAudioEncoder = FFmpegHelper.ResolveTargetAudioEncoder(task);
             task.Cancellation = new CancellationTokenSource();
             var token = task.Cancellation.Token;
 

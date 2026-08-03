@@ -387,9 +387,11 @@ namespace VideoConverter
                 {
                     numQuality.Minimum = spec.Min;
                     numQuality.Maximum = spec.Max;
+                    // 推荐值优先取可编辑配置（default_codec_settings.json），未配置回退硬编码。
+                    var def = DefaultCodecSettings.GetVideoDefault(encoder);
                     int want = (Preset != null && Preset.QualityValue > 0)
                         ? Preset.QualityValue
-                        : spec.Recommended;
+                        : (def != null ? def.Recommended : spec.Recommended);
                     // 默认 0 或越界 → 落到推荐值；用户手动调整过的有效值保留。
                     if (numQuality.Value == 0 || numQuality.Value < spec.Min || numQuality.Value > spec.Max)
                         numQuality.Value = want;

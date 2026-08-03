@@ -637,8 +637,17 @@ namespace VideoConverter
                     }
                     break;
                 default: // Auto
-                    if (!string.IsNullOrEmpty(bitrate))
+                    if (!string.IsNullOrEmpty(bitrate) && SupportsTargetBitrate(encoder))
+                    {
                         sb.AppendFormat(" -b:v {0}", bitrate);
+                    }
+                    else if (string.IsNullOrEmpty(bitrate))
+                    {
+                        // 码率=自动且预设无固定码率 → 输出程序默认质量参数（如 -crf 23 / -cq 26）。
+                        var defSpec = DefaultCodecSettings.GetVideoDefault(encoder);
+                        if (defSpec != null)
+                            sb.AppendFormat(" {0} {1}", defSpec.Param, defSpec.Recommended);
+                    }
                     break;
             }
         }
@@ -652,6 +661,163 @@ namespace VideoConverter
             long n;
             if (!long.TryParse(m.Groups[1].Value, out n)) return bitrate;
             return (n * 2).ToString() + m.Groups[2].Value.ToLowerInvariant();
+        }
+
+        #endregion
+
+        #region Smart stream copy (high-speed mode)
+
+        /// <summary>
+        /// 把编码器名或 ffprobe 的 codec_name 归一到家族名（h264/hevc/mpeg4/vp9/av1…），
+        /// 用于「输入编码 == 目标编码」的流级 copy 判定。返回 null 表示 copy/未知。
+        /// </summary>
+        public static string NormalizeVideoCodec(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            string e = s.Trim().ToLowerInvariant();
+            if (e == "copy") return null;
+            if (e.Contains("x264") || e == "h264" || e.Contains("avc1") || e == "h264_nvenc" || e == "h264_qsv" || e == "h264_amf")
+                return "h264";
+            if (e.Contains("x265") || e == "hevc" || e.Contains("hvc1") || e == "h265" || e.Contains("hevc_nvenc") || e.Contains("hevc_qsv") || e.Contains("hevc_amf"))
+                return "hevc";
+            if (e.Contains("xvid") || e.Contains("mpeg4") || e == "mp4v" || e.Contains("divx"))
+                return "mpeg4";
+            if (e.Contains("vp9")) return "vp9";
+            if (e.Contains("vp8") || e == "libvpx") return "vp8";
+            if (e.Contains("av1") || e.Contains("aom") || e.Contains("svt")) return "av1";
+            if (e.Contains("mpeg2") || e == "mpg2") return "mpeg2video";
+            if (e == "wmv2") return "wmv2";
+            if (e == "wmv3") return "wmv3";
+            if (e == "vc1" || e == "wvc1") return "vc1";
+            if (e.Contains("mjpeg") || e == "jpg" || e == "jpeg") return "mjpeg";
+            if (e.Contains("theora")) return "theora";
+            if (e == "gif" || e == "gifv") return "gif";
+            if (e.Contains("h263")) return "h263";
+            if (e.Contains("prores")) return "prores";
+            if (e.Contains("ffv1")) return "ffv1";
+            if (e == "png") return "png";
+            if (e == "bmp") return "bmp";
+            if (e == "tiff") return "tiff";
+            if (e.Contains("webp")) return "webp";
+            return e;
+        }
+
+        /// <summary>音频编码器/编解码名 → 家族名（aac/mp3/opus/vorbis/ac3/wma/flac/alac/pcm…）。</summary>
+        public static string NormalizeAudioCodec(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            string e = s.Trim().ToLowerInvariant();
+            if (e == "copy") return null;
+            if (e.Contains("aac")) return "aac";
+            if (e.Contains("mp3") || e.Contains("lame")) return "mp3";
+            if (e.Contains("opus")) return "opus";
+            if (e.Contains("vorbis")) return "vorbis";
+            if (e == "ac3" || e == "eac3") return "ac3";
+            if (e.Contains("wma") || e.Contains("wmav")) return "wma";
+            if (e.Contains("flac")) return "flac";
+            if (e.Contains("alac")) return "alac";
+            if (e.Contains("pcm")) return "pcm";
+            return e;
+        }
+
+        /// <summary>
+        /// 解析任务的目标视频编码器（实际 ffmpeg 编码器名）。
+        /// 预设指定了编码 → 按硬件勾选解析（libx264/h264_nvenc…）；
+        /// 预设为 copy（与源文件相同）→ 取目标容器的默认视频编码器。
+        /// </summary>
+        public static string ResolveTargetVideoEncoder(ConversionTask task, HardwareSupport hw, bool useHardware)
+        {
+            string target = task.Preset?.VideoCodec;
+            if (string.IsNullOrEmpty(target) || string.Equals(target, "copy", StringComparison.OrdinalIgnoreCase))
+            {
+                string container = GetContainerKey(task.Preset);
+                target = DefaultCodecSettings.GetContainerVideoEncoder(container);
+                if (string.IsNullOrEmpty(target)) return null;
+            }
+            string resolved = ResolveVideoEncoder(target, useHardware ? hw : null);
+            return string.Equals(resolved, "copy", StringComparison.OrdinalIgnoreCase) ? null : resolved;
+        }
+
+        /// <summary>解析任务的目标音频编码器（实际 ffmpeg 编码器名），copy/空 → 容器默认。</summary>
+        public static string ResolveTargetAudioEncoder(ConversionTask task)
+        {
+            string target = task.Preset?.AudioCodec;
+            if (string.IsNullOrEmpty(target) || string.Equals(target, "copy", StringComparison.OrdinalIgnoreCase))
+            {
+                string container = GetContainerKey(task.Preset);
+                target = DefaultCodecSettings.GetContainerAudioEncoder(container);
+            }
+            return (string.IsNullOrEmpty(target) || string.Equals(target, "copy", StringComparison.OrdinalIgnoreCase))
+                ? null
+                : target;
+        }
+
+        private static string GetContainerKey(PresetOption p)
+        {
+            string ext = p != null ? p.GetExtension() : ".mp4";
+            string key = ext.TrimStart('.').ToUpperInvariant();
+            return key.Length > 0 ? key : "MP4";
+        }
+
+        /// <summary>
+        /// 高速转换的智能流判定：视频/音频各自判定——
+        /// 输入编码 == 目标编码（规范化后）且该流码率模式为自动 → copy；
+        /// 否则用目标编码器转码并带默认参数（自动码率）或预设码率参数。
+        /// </summary>
+        private static void AppendSmartCopyStreams(StringBuilder sb, ConversionTask task)
+        {
+            var p = task.Preset;
+            string vEnc = task.TargetVideoEncoder;
+            string aEnc = task.TargetAudioEncoder;
+            string inV = NormalizeVideoCodec(task.SourceVideoCodec);
+            string inA = NormalizeAudioCodec(task.SourceAudioCodec);
+
+            // 视频流：编码一致 且 码率模式为自动 → copy（否则按预设/默认参数转码）
+            bool vAuto = p == null ||
+                         (string.IsNullOrEmpty(p.BitrateMode) ||
+                          string.Equals(p.BitrateMode, "auto", StringComparison.OrdinalIgnoreCase)) &&
+                         string.IsNullOrEmpty(p.VideoBitrate);
+            bool vCopy = vAuto && !string.IsNullOrEmpty(inV) && NormalizeVideoCodec(vEnc) == inV;
+            if (vCopy)
+            {
+                sb.Append(" -c:v copy");
+            }
+            else if (!string.IsNullOrEmpty(vEnc))
+            {
+                sb.AppendFormat(" -c:v {0}", vEnc);
+                if (p != null && !string.IsNullOrEmpty(p.ResolutionValue))
+                    sb.AppendFormat(" -s {0}", p.ResolutionValue);
+                AppendVideoBitrate(sb, p, vEnc);
+                if (p != null && !string.IsNullOrEmpty(p.FrameRate))
+                    sb.AppendFormat(" -r {0}", p.FrameRate);
+            }
+            else
+            {
+                sb.Append(" -c:v copy");
+            }
+
+            // 音频流：编码一致 且 音频码率自动 → copy
+            if (task.SelectedAudioTrack == null)
+            {
+                // -an 已由 stream mapping 部分输出，这里直接返回。
+                return;
+            }
+            bool aAuto = p == null || string.IsNullOrEmpty(p.AudioBitrate);
+            bool aCopy = aAuto && !string.IsNullOrEmpty(inA) && NormalizeAudioCodec(aEnc) == inA;
+            if (aCopy)
+            {
+                sb.Append(" -c:a copy");
+            }
+            else if (!string.IsNullOrEmpty(aEnc))
+            {
+                sb.AppendFormat(" -c:a {0}", aEnc);
+                string br = DefaultCodecSettings.GetAudioDefaultBitrate(aEnc);
+                if (!string.IsNullOrEmpty(br)) sb.AppendFormat(" -b:a {0}", br);
+            }
+            else
+            {
+                sb.Append(" -c:a copy");
+            }
         }
 
         #endregion
@@ -702,12 +868,13 @@ namespace VideoConverter
             else
                 sb.Append(" -an");
 
-            // High-speed mode: stream copy (only valid for matching containers).
-            // Cannot stream-copy when crop/rotation is requested.
+            // High-speed mode: smart per-stream copy — video/audio streams are
+            // copied only when input codec == target codec, otherwise re-encoded
+            // with the target codec + auto defaults. Cannot copy when crop/rotate.
             bool hasVideoFilter = task.Crop != null || task.Rotation != 0;
             if (task.UseStreamCopy && !hasVideoFilter)
             {
-                sb.Append(" -c copy");
+                AppendSmartCopyStreams(sb, task);
                 sb.AppendFormat(" \"{0}\"", outputPath);
                 return sb.ToString();
             }
@@ -769,6 +936,12 @@ namespace VideoConverter
                     sb.AppendFormat(" -c:a {0}", p.AudioCodec);
                     if (!string.IsNullOrEmpty(p.AudioBitrate))
                         sb.AppendFormat(" -b:a {0}", p.AudioBitrate);
+                    else
+                    {
+                        // 音频码率=自动 → 程序默认码率（如 aac → -b:a 192k）
+                        string br = DefaultCodecSettings.GetAudioDefaultBitrate(p.AudioCodec);
+                        if (!string.IsNullOrEmpty(br)) sb.AppendFormat(" -b:a {0}", br);
+                    }
                 }
 
                 // Subtitle: simplified to drop subtitles unless one is selected.
@@ -889,6 +1062,11 @@ namespace VideoConverter
                 sb.AppendFormat(" -c:a {0}", p.AudioCodec);
                 if (!string.IsNullOrEmpty(p.AudioBitrate))
                     sb.AppendFormat(" -b:a {0}", p.AudioBitrate);
+                else
+                {
+                    string br = DefaultCodecSettings.GetAudioDefaultBitrate(p.AudioCodec);
+                    if (!string.IsNullOrEmpty(br)) sb.AppendFormat(" -b:a {0}", br);
+                }
                 if (!string.IsNullOrEmpty(p.SampleRate))
                     sb.AppendFormat(" -ar {0}", p.SampleRate);
                 if (p.Channels > 0)
