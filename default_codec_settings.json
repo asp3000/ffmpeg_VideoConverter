@@ -1,0 +1,49 @@
+{
+  "videoDefaults": [
+    { "codec": "libx264", "param": "-crf", "value": 23, "min": 0, "max": 51 },
+    { "codec": "libx265", "param": "-crf", "value": 28, "min": 0, "max": 51 },
+    { "codec": "h264_nvenc", "param": "-cq", "value": 26, "min": 0, "max": 51 },
+    { "codec": "hevc_nvenc", "param": "-cq", "value": 30, "min": 0, "max": 51 },
+    { "codec": "h264_qsv", "param": "-global_quality", "value": 23, "min": 1, "max": 51 },
+    { "codec": "hevc_qsv", "param": "-global_quality", "value": 23, "min": 1, "max": 51 },
+    { "codec": "h264_amf", "param": "-qp", "value": 23, "min": 0, "max": 51 },
+    { "codec": "hevc_amf", "param": "-qp", "value": 23, "min": 0, "max": 51 },
+    { "codec": "libvpx-vp9", "param": "-crf", "value": 30, "min": 0, "max": 63 },
+    { "codec": "libaom-av1", "param": "-crf", "value": 30, "min": 0, "max": 63 },
+    { "codec": "libsvtav1", "param": "-crf", "value": 30, "min": 0, "max": 63 },
+    { "codec": "mpeg4", "param": "-q:v", "value": 3, "min": 1, "max": 31 },
+    { "codec": "libxvid", "param": "-q:v", "value": 3, "min": 1, "max": 31 },
+    { "codec": "mpeg2video", "param": "-q:v", "value": 3, "min": 1, "max": 31 },
+    { "codec": "mjpeg", "param": "-q:v", "value": 3, "min": 1, "max": 31 },
+    { "codec": "wmv2", "param": "-q:v", "value": 5, "min": 1, "max": 31 },
+    { "codec": "wmv3", "param": "-q:v", "value": 5, "min": 1, "max": 31 }
+  ],
+  "audioDefaults": [
+    { "codec": "aac", "bitrate": "192k" },
+    { "codec": "libmp3lame", "bitrate": "192k" },
+    { "codec": "libopus", "bitrate": "160k" },
+    { "codec": "libvorbis", "bitrate": "160k" },
+    { "codec": "ac3", "bitrate": "192k" },
+    { "codec": "wmav2", "bitrate": "192k" }
+  ],
+  "containerDefaults": [
+    { "container": "MP4", "video": "libx264", "audio": "aac" },
+    { "container": "MOV", "video": "libx264", "audio": "aac" },
+    { "container": "M4V", "video": "libx264", "audio": "aac" },
+    { "container": "F4V", "video": "libx264", "audio": "aac" },
+    { "container": "MKV", "video": "libx265", "audio": "aac" },
+    { "container": "AVI", "video": "mpeg4", "audio": "libmp3lame" },
+    { "container": "WMV", "video": "wmv2", "audio": "wmav2" },
+    { "container": "ASF", "video": "wmv2", "audio": "wmav2" },
+    { "container": "WEBM", "video": "libvpx-vp9", "audio": "libopus" },
+    { "container": "MPEG", "video": "mpeg2video", "audio": "libmp3lame" },
+    { "container": "MPG", "video": "mpeg2video", "audio": "libmp3lame" },
+    { "container": "VOB", "video": "mpeg2video", "audio": "libmp3lame" },
+    { "container": "TS", "video": "libx264", "audio": "aac" },
+    { "container": "M2TS", "video": "libx264", "audio": "aac" },
+    { "container": "FLV", "video": "libx264", "audio": "aac" },
+    { "container": "3GP", "video": "libx264", "audio": "aac" },
+    { "container": "OGV", "video": "libtheora", "audio": "libvorbis" },
+    { "container": "GIF", "video": "gif", "audio": null }
+  ]
+}

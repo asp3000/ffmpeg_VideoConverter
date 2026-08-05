@@ -115,6 +115,22 @@ namespace VideoConverter
             return ContainerDefaults.TryGetValue(container, out c) ? c.audio : null;
         }
 
+        /// <summary>
+        /// 「采样率=自动」时的全局默认值（Hz）。无法流复制时用此值兜底。
+        /// </summary>
+        public static int GetDefaultSampleRate() { return 44100; }
+
+        /// <summary>
+        /// 「声道=自动」时的全局默认值。无法流复制时用此值兜底。
+        /// </summary>
+        public static int GetDefaultChannels() { return 2; }
+
+        /// <summary>
+        /// 「帧率=自动」时的全局默认值（Hz）；0 表示保持源帧率（不指定 -r）。
+        /// 无法流复制时不指定 -r，由编码器沿用源帧率，避免抽帧/补帧。
+        /// </summary>
+        public static double GetDefaultFrameRate() { return 0; }
+
         // ---- built-in defaults (user-confirmed) ----------------------------
 
         private static DefaultCodecSettingsJson BuildBuiltIn()
@@ -139,7 +155,11 @@ namespace VideoConverter
                     V("mpeg2video", "-q:v", 3, 1, 31),
                     V("mjpeg", "-q:v", 3, 1, 31),
                     V("wmv2", "-q:v", 5, 1, 31),
-                    V("wmv3", "-q:v", 5, 1, 31)
+                    V("wmv3", "-q:v", 5, 1, 31),
+                    V("cfhd", "-q:v", 5, 1, 31),
+                    V("prores_ks", "-q:v", 3, 1, 5),
+                    V("libwebp", "-q:v", 80, 0, 100),
+                    V("libtheora", "-q:v", 5, 0, 10)
                 },
                 audioDefaults = new List<AudioDefaultJson>
                 {
@@ -148,7 +168,10 @@ namespace VideoConverter
                     A("libopus", "160k"),
                     A("libvorbis", "160k"),
                     A("ac3", "192k"),
-                    A("wmav2", "192k")
+                    A("wmav2", "192k"),
+                    A("mp2", "192k"),
+                    A("pcm_s16le", null),
+                    A("pcm_s24le", null)
                 },
                 containerDefaults = new List<ContainerDefaultJson>
                 {
@@ -169,7 +192,43 @@ namespace VideoConverter
                     C("FLV", "libx264", "aac"),
                     C("3GP", "libx264", "aac"),
                     C("OGV", "libtheora", "libvorbis"),
-                    C("GIF", "gif", null)
+                    C("GIF", "gif", null),
+                    // ---- 视频容器 ----
+                    C("DV", "dvvideo", "pcm_s16le"),
+                    C("3G2", "libx264", "aac"),
+                    C("AMV", "mjpeg", "libmp3lame"),
+                    C("MXF", "mpeg2video", "pcm_s16le"),
+                    // ---- 音频容器（video=null，无视频流）----
+                    C("MP3", null, "libmp3lame"),
+                    C("WAV", null, "pcm_s16le"),
+                    C("AAC", null, "aac"),
+                    C("AC3", null, "ac3"),
+                    C("FLAC", null, "flac"),
+                    C("M4A", null, "aac"),
+                    C("M4B", null, "aac"),
+                    C("M4R", null, "aac"),
+                    C("WMA", null, "wmav2"),
+                    C("OGG", null, "libvorbis"),
+                    C("MKA", null, "aac"),
+                    C("AU", null, "pcm_s16le"),
+                    C("APE", null, "ape"),
+                    C("AIFF", null, "pcm_s16le"),
+                    C("AMR", null, "amr_nb"),
+                    C("MP2", null, "mp2"),
+                    // ---- 图像容器（audio=null，无音频流）----
+                    C("JPG", "mjpeg", null),
+                    C("JPEG", "mjpeg", null),
+                    C("PNG", "png", null),
+                    C("BMP", "bmp", null),
+                    C("TIFF", "tiff", null),
+                    C("TIF", "tiff", null),
+                    C("ICO", "png", null),
+                    C("SVG", "png", null),
+                    C("WEBP", "libwebp", null),
+                    C("AVIF", "libaom-av1", null),
+                    C("EPS", "png", null),
+                    C("PSD", "png", null),
+                    C("XBM", "xbm", null)
                 }
             };
         }

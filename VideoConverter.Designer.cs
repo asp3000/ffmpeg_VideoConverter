@@ -30,6 +30,7 @@ namespace VideoConverter
         {
             this.topPanel = new System.Windows.Forms.Panel();
             this.addFilesButton = new System.Windows.Forms.Button();
+            this.addFolderButton = new System.Windows.Forms.Button();
             this.deleteButton = new System.Windows.Forms.Button();
             this.highSpeedCheck = new System.Windows.Forms.CheckBox();
             this.hardwareCheck = new System.Windows.Forms.CheckBox();
@@ -40,6 +41,7 @@ namespace VideoConverter
             this.bottomPanel = new System.Windows.Forms.Panel();
             this.convertAllButton = new System.Windows.Forms.Button();
             this.mergeCheck = new System.Windows.Forms.CheckBox();
+            this.chapterCheck = new System.Windows.Forms.CheckBox();
             this.saveToCombo = new System.Windows.Forms.ComboBox();
             this.labelSaveTo = new System.Windows.Forms.Label();
             this.convertToPanel = new System.Windows.Forms.Panel();
@@ -47,14 +49,16 @@ namespace VideoConverter
             this.convertToGearButton = new System.Windows.Forms.Button();
             this.labelConvertTo = new System.Windows.Forms.Label();
             this.openFileDialog = new System.Windows.Forms.OpenFileDialog();
+            this.folderBrowserDialog = new System.Windows.Forms.FolderBrowserDialog();
             this.topPanel.SuspendLayout();
             this.bottomPanel.SuspendLayout();
             this.SuspendLayout();
-            // 
+            //
             // topPanel
-            // 
+            //
             this.topPanel.BackColor = System.Drawing.Color.White;
             this.topPanel.Controls.Add(this.addFilesButton);
+            this.topPanel.Controls.Add(this.addFolderButton);
             this.topPanel.Controls.Add(this.deleteButton);
             this.topPanel.Controls.Add(this.hardwareCheck);
             this.topPanel.Controls.Add(this.highSpeedCheck);
@@ -66,41 +70,57 @@ namespace VideoConverter
             this.topPanel.Name = "topPanel";
             this.topPanel.Size = new System.Drawing.Size(1280, 56);
             this.topPanel.TabIndex = 0;
-            // 
+            //
             // addFilesButton
-            // 
+            //
             this.addFilesButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.addFilesButton.BackColor = System.Drawing.Color.White;
             this.addFilesButton.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(124)))), ((int)(((byte)(77)))), ((int)(((byte)(255)))));
             this.addFilesButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.addFilesButton.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.addFilesButton.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(124)))), ((int)(((byte)(77)))), ((int)(((byte)(255)))));
-            this.addFilesButton.Location = new System.Drawing.Point(1150, 12);
+            this.addFilesButton.Location = new System.Drawing.Point(1170, 12);
             this.addFilesButton.Name = "addFilesButton";
-            this.addFilesButton.Size = new System.Drawing.Size(110, 32);
-            this.addFilesButton.TabIndex = 5;
-            this.addFilesButton.Text = "+ 添加文件";
+            this.addFilesButton.Size = new System.Drawing.Size(90, 32);
+            this.addFilesButton.TabIndex = 6;
+            this.addFilesButton.Text = "添加文件";
             this.addFilesButton.UseVisualStyleBackColor = false;
             this.addFilesButton.Click += new System.EventHandler(this.AddFilesButton_Click);
-            // 
+            //
+            // addFolderButton
+            //
+            this.addFolderButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.addFolderButton.BackColor = System.Drawing.Color.White;
+            this.addFolderButton.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(200)))), ((int)(((byte)(200)))), ((int)(((byte)(200)))));
+            this.addFolderButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.addFolderButton.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.addFolderButton.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(80)))), ((int)(((byte)(80)))), ((int)(((byte)(80)))));
+            this.addFolderButton.Location = new System.Drawing.Point(1076, 12);
+            this.addFolderButton.Name = "addFolderButton";
+            this.addFolderButton.Size = new System.Drawing.Size(90, 32);
+            this.addFolderButton.TabIndex = 5;
+            this.addFolderButton.Text = "添加文件夹";
+            this.addFolderButton.UseVisualStyleBackColor = false;
+            this.addFolderButton.Click += new System.EventHandler(this.AddFolderButton_Click);
+            //
             // deleteButton
-            // 
+            //
             this.deleteButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.deleteButton.BackColor = System.Drawing.Color.White;
             this.deleteButton.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(((int)(((byte)(200)))), ((int)(((byte)(200)))), ((int)(((byte)(200)))));
             this.deleteButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.deleteButton.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.deleteButton.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(80)))), ((int)(((byte)(80)))), ((int)(((byte)(80)))));
-            this.deleteButton.Location = new System.Drawing.Point(1072, 12);
+            this.deleteButton.Location = new System.Drawing.Point(1012, 12);
             this.deleteButton.Name = "deleteButton";
-            this.deleteButton.Size = new System.Drawing.Size(64, 32);
+            this.deleteButton.Size = new System.Drawing.Size(56, 32);
             this.deleteButton.TabIndex = 4;
-            this.deleteButton.Text = "清空";
+            this.deleteButton.Text = "清理";
             this.deleteButton.UseVisualStyleBackColor = false;
             this.deleteButton.Click += new System.EventHandler(this.DeleteButton_Click);
-            // 
+            //
             // highSpeedCheck
-            // 
+            //
             this.highSpeedCheck.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.highSpeedCheck.Appearance = System.Windows.Forms.Appearance.Normal;
             this.highSpeedCheck.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(225)))), ((int)(((byte)(225)))), ((int)(((byte)(225)))));
@@ -115,11 +135,12 @@ namespace VideoConverter
             this.highSpeedCheck.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
             this.highSpeedCheck.UseVisualStyleBackColor = false;
             this.highSpeedCheck.CheckedChanged += new System.EventHandler(this.HighSpeedCheck_CheckedChanged);
-            // 
+            //
             // hardwareCheck
-            // 
+            //
             this.hardwareCheck.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.hardwareCheck.Appearance = System.Windows.Forms.Appearance.Normal;
+            this.hardwareCheck.AutoEllipsis = true;
             this.hardwareCheck.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(225)))), ((int)(((byte)(225)))), ((int)(((byte)(225)))));
             this.hardwareCheck.Enabled = false;
             this.hardwareCheck.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
@@ -127,15 +148,15 @@ namespace VideoConverter
             this.hardwareCheck.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(90)))), ((int)(((byte)(90)))), ((int)(((byte)(90)))));
             this.hardwareCheck.Location = new System.Drawing.Point(820, 16);
             this.hardwareCheck.Name = "hardwareCheck";
-            this.hardwareCheck.Size = new System.Drawing.Size(240, 26);
+            this.hardwareCheck.Size = new System.Drawing.Size(180, 26);
             this.hardwareCheck.TabIndex = 4;
             this.hardwareCheck.Text = "硬件编码";
             this.hardwareCheck.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
             this.hardwareCheck.UseVisualStyleBackColor = false;
             this.hardwareCheck.CheckedChanged += new System.EventHandler(this.HardwareCheck_CheckedChanged);
-            // 
+            //
             // tabCompletedLabel
-            // 
+            //
             this.tabCompletedLabel.AutoSize = true;
             this.tabCompletedLabel.Cursor = System.Windows.Forms.Cursors.Hand;
             this.tabCompletedLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 11F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
@@ -146,9 +167,9 @@ namespace VideoConverter
             this.tabCompletedLabel.TabIndex = 1;
             this.tabCompletedLabel.Text = "转换完成";
             this.tabCompletedLabel.Click += new System.EventHandler(this.TabCompletedLabel_Click);
-            // 
+            //
             // tabConvertingLabel
-            // 
+            //
             this.tabConvertingLabel.AutoSize = true;
             this.tabConvertingLabel.Cursor = System.Windows.Forms.Cursors.Hand;
             this.tabConvertingLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 11F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
@@ -159,9 +180,9 @@ namespace VideoConverter
             this.tabConvertingLabel.TabIndex = 0;
             this.tabConvertingLabel.Text = "正在转换";
             this.tabConvertingLabel.Click += new System.EventHandler(this.TabConvertingLabel_Click);
-            // 
+            //
             // convertingCountLabel
-            // 
+            //
             this.convertingCountLabel.AutoSize = true;
             this.convertingCountLabel.Font = new System.Drawing.Font("Microsoft YaHei UI", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.convertingCountLabel.ForeColor = System.Drawing.Color.Gray;
@@ -170,9 +191,9 @@ namespace VideoConverter
             this.convertingCountLabel.Size = new System.Drawing.Size(33, 20);
             this.convertingCountLabel.TabIndex = 2;
             this.convertingCountLabel.Text = "(0)";
-            // 
+            //
             // taskListPanel
-            // 
+            //
             this.taskListPanel.AutoScroll = true;
             this.taskListPanel.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(248)))), ((int)(((byte)(246)))), ((int)(((byte)(252)))));
             this.taskListPanel.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -184,12 +205,13 @@ namespace VideoConverter
             this.taskListPanel.Size = new System.Drawing.Size(1280, 680);
             this.taskListPanel.TabIndex = 1;
             this.taskListPanel.WrapContents = false;
-            // 
+            //
             // bottomPanel
-            // 
+            //
             this.bottomPanel.BackColor = System.Drawing.Color.White;
             this.bottomPanel.Controls.Add(this.convertAllButton);
             this.bottomPanel.Controls.Add(this.mergeCheck);
+            this.bottomPanel.Controls.Add(this.chapterCheck);
             this.bottomPanel.Controls.Add(this.saveToCombo);
             this.bottomPanel.Controls.Add(this.labelSaveTo);
             this.bottomPanel.Controls.Add(this.convertToPanel);
@@ -199,9 +221,9 @@ namespace VideoConverter
             this.bottomPanel.Name = "bottomPanel";
             this.bottomPanel.Size = new System.Drawing.Size(1280, 64);
             this.bottomPanel.TabIndex = 2;
-            // 
+            //
             // convertAllButton
-            // 
+            //
             this.convertAllButton.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.convertAllButton.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(124)))), ((int)(((byte)(77)))), ((int)(((byte)(255)))));
             this.convertAllButton.FlatAppearance.BorderSize = 0;
@@ -215,9 +237,9 @@ namespace VideoConverter
             this.convertAllButton.Text = "全部转换";
             this.convertAllButton.UseVisualStyleBackColor = false;
             this.convertAllButton.Click += new System.EventHandler(this.ConvertAllButton_Click);
-            // 
+            //
             // mergeCheck
-            // 
+            //
             this.mergeCheck.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.mergeCheck.AutoSize = true;
             this.mergeCheck.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
@@ -228,21 +250,35 @@ namespace VideoConverter
             this.mergeCheck.TabIndex = 4;
             this.mergeCheck.Text = "合并所有文件";
             this.mergeCheck.UseVisualStyleBackColor = true;
-            // 
+            //
+            // chapterCheck
+            //
+            this.chapterCheck.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.chapterCheck.AutoSize = true;
+            this.chapterCheck.Checked = true;
+            this.chapterCheck.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.chapterCheck.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.chapterCheck.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(80)))), ((int)(((byte)(80)))), ((int)(((byte)(80)))));
+            this.chapterCheck.Location = new System.Drawing.Point(820, 22);
+            this.chapterCheck.Name = "chapterCheck";
+            this.chapterCheck.Size = new System.Drawing.Size(111, 21);
+            this.chapterCheck.TabIndex = 6;
+            this.chapterCheck.Text = "保留章节";
+            this.chapterCheck.UseVisualStyleBackColor = true;
+            //
             // saveToCombo
-            // 
-            this.saveToCombo.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
+            //
+            this.saveToCombo.Anchor = ((System.Windows.Forms.AnchorStyles)(System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left));
             this.saveToCombo.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.saveToCombo.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.saveToCombo.FormattingEnabled = true;
             this.saveToCombo.Location = new System.Drawing.Point(460, 20);
             this.saveToCombo.Name = "saveToCombo";
-            this.saveToCombo.Size = new System.Drawing.Size(460, 25);
+            this.saveToCombo.Size = new System.Drawing.Size(348, 25);
             this.saveToCombo.TabIndex = 3;
-            // 
+            //
             // labelSaveTo
-            // 
+            //
             this.labelSaveTo.AutoSize = true;
             this.labelSaveTo.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.labelSaveTo.ForeColor = System.Drawing.Color.Gray;
@@ -251,9 +287,9 @@ namespace VideoConverter
             this.labelSaveTo.Size = new System.Drawing.Size(54, 17);
             this.labelSaveTo.TabIndex = 2;
             this.labelSaveTo.Text = "保存到";
-            // 
+            //
             // convertToPanel
-            // 
+            //
             this.convertToPanel.BackColor = System.Drawing.Color.White;
             this.convertToPanel.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.convertToPanel.Controls.Add(this.convertToButton);
@@ -262,9 +298,9 @@ namespace VideoConverter
             this.convertToPanel.Name = "convertToPanel";
             this.convertToPanel.Size = new System.Drawing.Size(280, 28);
             this.convertToPanel.TabIndex = 1;
-            // 
+            //
             // convertToButton
-            // 
+            //
             this.convertToButton.Dock = System.Windows.Forms.DockStyle.Fill;
             this.convertToButton.FlatAppearance.BorderSize = 0;
             this.convertToButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
@@ -277,9 +313,9 @@ namespace VideoConverter
             this.convertToButton.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             this.convertToButton.UseVisualStyleBackColor = true;
             this.convertToButton.Click += new System.EventHandler(this.ConvertToButton_Click);
-            // 
+            //
             // convertToGearButton
-            // 
+            //
             this.convertToGearButton.Dock = System.Windows.Forms.DockStyle.Right;
             this.convertToGearButton.FlatAppearance.BorderSize = 0;
             this.convertToGearButton.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
@@ -291,9 +327,9 @@ namespace VideoConverter
             this.convertToGearButton.Text = "⚙";
             this.convertToGearButton.UseVisualStyleBackColor = true;
             this.convertToGearButton.Click += new System.EventHandler(this.ConvertToGearButton_Click);
-            // 
+            //
             // labelConvertTo
-            // 
+            //
             this.labelConvertTo.AutoSize = true;
             this.labelConvertTo.Font = new System.Drawing.Font("Microsoft YaHei UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.labelConvertTo.ForeColor = System.Drawing.Color.Gray;
@@ -302,15 +338,20 @@ namespace VideoConverter
             this.labelConvertTo.Size = new System.Drawing.Size(64, 17);
             this.labelConvertTo.TabIndex = 0;
             this.labelConvertTo.Text = "转换到";
-            // 
+            //
             // openFileDialog
-            // 
-            this.openFileDialog.Filter = "视频文件|*.mp4;*.mkv;*.avi;*.mov;*.wmv;*.flv;*.webm;*.m4v|所有文件|*.*";
+            //
+            this.openFileDialog.Filter = "媒体文件|*.mp4;*.mkv;*.avi;*.mov;*.wmv;*.flv;*.webm;*.m4v;*.mpg;*.mpeg;*.ts;*.m2ts;*.mts;*.vob;*.ogv;*.3gp;*.rm;*.rmvb;*.mp3;*.aac;*.wav;*.flac;*.ogg;*.wma;*.m4a;*.ac3;*.opus;*.aiff;*.jpg;*.jpeg;*.png;*.bmp;*.tiff;*.tif;*.webp;*.gif|所有文件|*.*";
             this.openFileDialog.Multiselect = true;
             this.openFileDialog.Title = "添加视频文件";
-            // 
+            //
+            // folderBrowserDialog
+            //
+            this.folderBrowserDialog.Description = "选择包含媒体文件的文件夹";
+            this.folderBrowserDialog.ShowNewFolderButton = false;
+            //
             // VideoConverter
-            // 
+            //
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 17F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.White;
@@ -343,6 +384,7 @@ namespace VideoConverter
         private System.Windows.Forms.CheckBox hardwareCheck;
         private System.Windows.Forms.Button deleteButton;
         private System.Windows.Forms.Button addFilesButton;
+        private System.Windows.Forms.Button addFolderButton;
         private System.Windows.Forms.FlowLayoutPanel taskListPanel;
         private System.Windows.Forms.Panel bottomPanel;
         private System.Windows.Forms.Label labelConvertTo;
@@ -352,7 +394,9 @@ namespace VideoConverter
         private System.Windows.Forms.ComboBox saveToCombo;
         private System.Windows.Forms.Label labelSaveTo;
         private System.Windows.Forms.CheckBox mergeCheck;
+        private System.Windows.Forms.CheckBox chapterCheck;
         private System.Windows.Forms.Button convertAllButton;
         private System.Windows.Forms.OpenFileDialog openFileDialog;
+        private System.Windows.Forms.FolderBrowserDialog folderBrowserDialog;
     }
 }

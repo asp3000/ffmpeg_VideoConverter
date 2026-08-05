@@ -274,7 +274,7 @@ namespace VideoConverter
 
         private static Process StartFfmpeg(string args, out Stream stdout)
         {
-            var psi = new ProcessStartInfo(FFmpegHelper.FFmpegPath, args)
+            var psi = new ProcessStartInfo(FFmpegHelper.FFmpegPath, "-nostdin " + args)
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,

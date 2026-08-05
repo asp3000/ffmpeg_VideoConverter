@@ -34,6 +34,13 @@ namespace VideoConverter
         private NumericUpDown numQuality;
         private Label lblMaxRate;
         private ComboBox cmbMaxRate;
+        private readonly ToolTip _tips = new ToolTip { AutoPopDelay = 12000, InitialDelay = 400, ReshowDelay = 200 };
+        /// <summary>用户是否手动调整过质量控制值：false 时切换编码器一律落到该编码器的推荐值。</summary>
+        private bool _qualityUserSet;
+        /// <summary>UpdateBitrateUI 是否已完成首次初始化。
+        /// 首次加载时必须从“预设已存 QualityValue”恢复，而不是取 NumericUpDown 的默认值 0；
+        /// 之后（切换编码器）才取控件当前值以保留用户本次编辑会话手填的值。</summary>
+        private bool _bitrateUiInitialized;
         private ComboBox cmbVideoBitrate;
         private ComboBox cmbAudioCodec;
         private ComboBox cmbChannel;
@@ -287,19 +294,19 @@ namespace VideoConverter
         private PresetOption GatherPreviewPreset()
         {
             var snap = Preset != null ? Preset.Clone() : new PresetOption();
-            snap.VideoCodec = GetComboValue(cmbVideoCodec, "copy");
+            snap.VideoCodec = GetComboValue(cmbVideoCodec, null);
             var vitem = cmbVideoCodec.SelectedItem as OptionItem;
             snap.VideoCodecLabel = (cmbVideoCodec.SelectedIndex > 0 && vitem != null) ? vitem.Label : null;
             snap.ResolutionValue = GetComboValue(cmbResolution, null);
             snap.ResolutionLabel = string.IsNullOrEmpty(snap.ResolutionValue)
-                ? "与源文件相同"
+                ? "自动"
                 : snap.ResolutionValue.Replace("x", " x ");
             snap.FrameRate = GetComboValue(cmbFrameRate, null);
             snap.BitrateMode = SelectedBitrateModeString();
             snap.QualityValue = (int)numQuality.Value;
             snap.QualityMaxRate = GetComboValue(cmbMaxRate, null);
             snap.VideoBitrate = GetComboValue(cmbVideoBitrate, null);
-            snap.AudioCodec = GetComboValue(cmbAudioCodec, "copy");
+            snap.AudioCodec = GetComboValue(cmbAudioCodec, null);
             if (int.TryParse(GetComboValue(cmbChannel, null), out int ch))
                 snap.Channels = ch;
             else
@@ -347,7 +354,7 @@ namespace VideoConverter
             _updatingBitrateUI = true;
             try
             {
-                string fourCC = GetComboValue(cmbVideoCodec, "copy");
+                string fourCC = GetComboValue(cmbVideoCodec, null);
                 string encoder = FFmpegHelper.ResolveVideoEncoder(fourCC, UseHardwareEncoding ? _hw : null);
                 var spec = FFmpegHelper.GetQualitySpec(encoder);
                 bool canTarget = FFmpegHelper.SupportsTargetBitrate(encoder);
@@ -372,29 +379,58 @@ namespace VideoConverter
 
                 string mode = SelectedBitrateModeString();
                 bool isQuality = string.Equals(mode, "quality", StringComparison.OrdinalIgnoreCase);
-                bool isTarget = string.Equals(mode, "cbr", StringComparison.OrdinalIgnoreCase) ||
-                                string.Equals(mode, "vbr", StringComparison.OrdinalIgnoreCase);
+                bool isVbr = string.Equals(mode, "vbr", StringComparison.OrdinalIgnoreCase);
+                bool isTarget = string.Equals(mode, "cbr", StringComparison.OrdinalIgnoreCase) || isVbr;
+
+                // -maxrate/-bufsize 是 VBV 峰值约束，独立于码率控制模式：
+                //   VBR + maxrate  = 受限 VBR（constrained VBR，maxrate 最本源的用法）
+                //   CRF + maxrate  = Capped CRF
+                // CBR 已由程序自动写死 maxrate=码率，故不再让用户选。
+                // intra-only 编码器（mjpeg/prores 等）不响应 maxrate，隐藏该项避免误导。
+                bool canVbv = FFmpegHelper.SupportsVbv(encoder);
+                bool showMaxRate = (isQuality || isVbr) && canVbv;
 
                 lblRate.Visible = isTarget;
                 cmbVideoBitrate.Visible = isTarget;
                 lblQuality.Visible = isQuality;
                 numQuality.Visible = isQuality;
                 lblQualityRange.Visible = isQuality;
-                lblMaxRate.Visible = isQuality;
-                cmbMaxRate.Visible = isQuality;
+                lblMaxRate.Visible = showMaxRate;
+                cmbMaxRate.Visible = showMaxRate;
+
+                if (showMaxRate)
+                {
+                    RefreshMaxRateOptions(isVbr);
+                    _tips.SetToolTip(cmbMaxRate, isVbr
+                        ? "受限 VBR：平均码率取「码率」，瞬时峰值不超过此值。\r\n只列出 ≥ 目标码率的档位（低于目标码率会退化成 CBR）。\r\n选「不限峰值」= 纯 ABR，峰值不受约束。"
+                        : "Capped CRF：在恒定质量基础上限制瞬时峰值码率。\r\n选「不限峰值」= 质量优先，码率不设上限。");
+                }
 
                 if (isQuality && spec != null)
                 {
-                    numQuality.Minimum = spec.Min;
+                    // 必须先取旧值再改 Min/Max：NumericUpDown 在设置 Minimum/Maximum 时会把
+                    // 越界的 Value 静默钳制到边界上，之后再判断就永远"合法"了。
+                    // （典型症状：mjpeg 的 Min=1 把默认 0 抬成 1，推荐值 3 永远用不上。）
+                    // 首次加载时 prev 取预设已存的 QualityValue（正确恢复 CRF）；
+                    // 之后切换编码器时取控件当前值（保留用户本次会话手填的值）。
+                    decimal prev = _bitrateUiInitialized
+                        ? numQuality.Value
+                        : (Preset != null ? Preset.QualityValue : 0);
+                    numQuality.Minimum = 0;            // 先放开下限，避免设 Maximum 时被反向钳制
                     numQuality.Maximum = spec.Max;
+                    numQuality.Minimum = spec.Min;
+
                     // 推荐值优先取可编辑配置（default_codec_settings.json），未配置回退硬编码。
                     var def = DefaultCodecSettings.GetVideoDefault(encoder);
-                    int want = (Preset != null && Preset.QualityValue > 0)
+                    int want = (Preset != null && Preset.QualityValue >= spec.Min && Preset.QualityValue <= spec.Max && Preset.QualityValue > 0)
                         ? Preset.QualityValue
                         : (def != null ? def.Recommended : spec.Recommended);
-                    // 默认 0 或越界 → 落到推荐值；用户手动调整过的有效值保留。
-                    if (numQuality.Value == 0 || numQuality.Value < spec.Min || numQuality.Value > spec.Max)
-                        numQuality.Value = want;
+                    if (want < spec.Min) want = spec.Min;     // 配置被手工改坏时兜底
+                    if (want > spec.Max) want = spec.Max;
+
+                    // 用户手动调过且仍在当前编码器有效区间内 → 保留；否则落到推荐值。
+                    bool keepPrev = _qualityUserSet && prev >= spec.Min && prev <= spec.Max;
+                    numQuality.Value = keepPrev ? prev : want;
                     lblQualityRange.Text = string.Format("{0}（参数 {1}）", spec.ToString(), spec.Param);
                 }
             }
@@ -405,7 +441,32 @@ namespace VideoConverter
             finally
             {
                 _updatingBitrateUI = false;
+                _bitrateUiInitialized = true;
             }
+        }
+
+        /// <summary>
+        /// 重建「最大码率」下拉项。
+        /// VBR 下只列出 ≥ 目标码率的档位：maxrate 低于平均码率在物理上不可满足，
+        /// x264 会以 maxrate 为准把 rc 判定成 cbr（实测 -b:v 4000k -maxrate 4000k → rc=cbr），
+        /// 从源头过滤可避免用户选到自相矛盾的组合。质量控制模式无平均码率约束，故不过滤。
+        /// </summary>
+        private void RefreshMaxRateOptions(bool isVbr)
+        {
+            if (_options == null || _options.VideoBitrates == null) return;
+
+            string cur = GetComboValue(cmbMaxRate, null);
+            long target = isVbr ? FFmpegHelper.ParseBitrateKbps(GetComboValue(cmbVideoBitrate, null)) : -1;
+
+            var list = new List<OptionItem>();
+            foreach (var it in _options.VideoBitrates)
+            {
+                if (it == null || string.IsNullOrWhiteSpace(it.Value)) continue;
+                if (target > 0 && FFmpegHelper.ParseBitrateKbps(it.Value) < target) continue;
+                list.Add(it);
+            }
+            // 原选中值若被过滤掉，LoadCombo 会自动回落到「不限峰值」。
+            LoadCombo(cmbMaxRate, list, cur, "不限峰值");
         }
 
         /// <summary>标题显示「类型 名称」，例如 “MP4 Video 1080P 超清”。</summary>
@@ -445,14 +506,17 @@ namespace VideoConverter
                 MergeFallback(_options, Preset);
 
                 LoadCombo(cmbVideoCodec, _options.VideoCodecs, Preset.VideoCodec, "自动");
-                LoadCombo(cmbResolution, _options.Resolutions, Preset.ResolutionValue, "与源文件相同");
+                LoadCombo(cmbResolution, _options.Resolutions, Preset.ResolutionValue, "自动");
                 LoadCombo(cmbFrameRate, _options.FrameRates, Preset.FrameRate, "自动");
                 LoadCombo(cmbVideoBitrate, _options.VideoBitrates, Preset.VideoBitrate, "自动");
                 LoadCombo(cmbAudioCodec, _options.AudioCodecs, Preset.AudioCodec, "自动");
                 LoadCombo(cmbChannel, _options.Channels, Preset.Channels > 0 ? Preset.Channels.ToString() : null, "自动");
                 LoadCombo(cmbSampleRate, _options.SampleRates, Preset.SampleRate, "自动");
                 LoadCombo(cmbAudioBitrate, _options.AudioBitrates, Preset.AudioBitrate, "自动");
-                LoadCombo(cmbMaxRate, _options.VideoBitrates, Preset.QualityMaxRate, "自动");
+                LoadCombo(cmbMaxRate, _options.VideoBitrates, Preset.QualityMaxRate, "不限峰值");
+
+                // 预设里已存过质量值 → 视为用户设定，切换编码器时保留（仍在有效区间的前提下）。
+                _qualityUserSet = Preset.QualityValue > 0;
 
                 txtTitle.Text = Preset.Name ?? "";
                 txtCustomArgs.Text = Preset.CustomArgs ?? "";
@@ -482,13 +546,19 @@ namespace VideoConverter
                 // 码率模式：按编码器支持动态重建选项，并联动质量控制/码率显示。
                 cmbBitrateMode.SelectedIndexChanged += (s, e) => { UpdateBitrateUI(); UpdatePreview(); };
                 cmbVideoCodec.SelectedIndexChanged += (s, e) => { UpdateBitrateUI(); UpdatePreview(); };
-                numQuality.ValueChanged += (s, e) => UpdatePreview();
+                // 仅把"人为改动"记为已设定：UpdateBitrateUI 内部的程序化赋值不算。
+                numQuality.ValueChanged += (s, e) =>
+                {
+                    if (!_updatingBitrateUI) _qualityUserSet = true;
+                    UpdatePreview();
+                };
                 cmbMaxRate.SelectedIndexChanged += (s, e) => UpdatePreview();
 
                 // 任一参数变化 → 实时刷新 ffmpeg 参数预览
                 cmbResolution.SelectedIndexChanged += (s, e) => UpdatePreview();
                 cmbFrameRate.SelectedIndexChanged += (s, e) => UpdatePreview();
-                cmbVideoBitrate.SelectedIndexChanged += (s, e) => UpdatePreview();
+                // 目标码率变化会改变「最大码率」的可选下界（VBR），需一并刷新。
+                cmbVideoBitrate.SelectedIndexChanged += (s, e) => { UpdateBitrateUI(); UpdatePreview(); };
                 cmbAudioCodec.SelectedIndexChanged += (s, e) => UpdatePreview();
                 cmbChannel.SelectedIndexChanged += (s, e) => UpdatePreview();
                 cmbSampleRate.SelectedIndexChanged += (s, e) => UpdatePreview();
@@ -549,8 +619,11 @@ namespace VideoConverter
         /// </summary>
         private void MergeFallback(FormatOptions o, PresetOption p)
         {
-            EnsureValue(o.VideoCodecs, p.VideoCodec, p.VideoCodecLabel ?? p.VideoCodec);
-            EnsureValue(o.AudioCodecs, p.AudioCodec, p.AudioCodec);
+            // "copy"/"与源文件相同" 统一为"自动"（索引 0），不在下拉中插入 copy 项。
+            if (!IsCopyOrAuto(p.VideoCodec))
+                EnsureValue(o.VideoCodecs, p.VideoCodec, p.VideoCodecLabel ?? p.VideoCodec);
+            if (!IsCopyOrAuto(p.AudioCodec))
+                EnsureValue(o.AudioCodecs, p.AudioCodec, p.AudioCodec);
             EnsureValue(o.Resolutions, p.ResolutionValue, p.ResolutionLabel);
             EnsureValue(o.FrameRates, p.FrameRate, p.FrameRate + " fps");
             EnsureValue(o.VideoBitrates, p.VideoBitrate, TrimK(p.VideoBitrate) + " kbps");
@@ -558,6 +631,14 @@ namespace VideoConverter
             EnsureValue(o.SampleRates, p.SampleRate, p.SampleRate + " Hz");
             if (p.Channels > 0)
                 EnsureValue(o.Channels, p.Channels.ToString(), p.Channels + " 声道");
+        }
+
+        /// <summary>值为 copy/空/自动 时视为"自动"，不插入下拉项。</summary>
+        private static bool IsCopyOrAuto(string v)
+        {
+            return string.IsNullOrWhiteSpace(v)
+                || string.Equals(v, "copy", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(v, "auto", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void EnsureValue(List<OptionItem> list, string value, string label)
@@ -600,19 +681,19 @@ namespace VideoConverter
                     Preset.Name = title;
                 }
 
-                Preset.VideoCodec = GetComboValue(cmbVideoCodec, "copy");
+                Preset.VideoCodec = GetComboValue(cmbVideoCodec, null);
                 var vitem = cmbVideoCodec.SelectedItem as OptionItem;
                 Preset.VideoCodecLabel = (cmbVideoCodec.SelectedIndex > 0 && vitem != null) ? vitem.Label : null;
                 Preset.ResolutionValue = GetComboValue(cmbResolution, null);
                 Preset.ResolutionLabel = string.IsNullOrEmpty(Preset.ResolutionValue)
-                    ? "与源文件相同"
+                    ? "自动"
                     : Preset.ResolutionValue.Replace("x", " x ");
                 Preset.FrameRate = GetComboValue(cmbFrameRate, null);
                 Preset.BitrateMode = SelectedBitrateModeString();
                 Preset.QualityValue = (int)numQuality.Value;
                 Preset.QualityMaxRate = GetComboValue(cmbMaxRate, null);
                 Preset.VideoBitrate = GetComboValue(cmbVideoBitrate, null);
-                Preset.AudioCodec = GetComboValue(cmbAudioCodec, "copy");
+                Preset.AudioCodec = GetComboValue(cmbAudioCodec, null);
                 if (int.TryParse(GetComboValue(cmbChannel, null), out int ch))
                     Preset.Channels = ch;
                 else

@@ -1,0 +1,53 @@
+{
+  "hardwareCodecs": [
+    {
+      "label": "H.264",
+      "cpuEncoders": [ "libx264" ],
+      "hardwareEncoders": [
+        { "vendor": "NVIDIA", "encoder": "h264_nvenc" },
+        { "vendor": "Intel",  "encoder": "h264_qsv" },
+        { "vendor": "AMD",    "encoder": "h264_amf" }
+      ]
+    },
+    {
+      "label": "H.265 (HEVC)",
+      "cpuEncoders": [ "libx265" ],
+      "hardwareEncoders": [
+        { "vendor": "NVIDIA", "encoder": "hevc_nvenc" },
+        { "vendor": "Intel",  "encoder": "hevc_qsv" },
+        { "vendor": "AMD",    "encoder": "hevc_amf" }
+      ]
+    },
+    {
+      "label": "AV1",
+      "cpuEncoders": [ "libsvtav1", "libaom-av1" ],
+      "hardwareEncoders": [
+        { "vendor": "NVIDIA", "encoder": "av1_nvenc" },
+        { "vendor": "Intel",  "encoder": "av1_qsv" },
+        { "vendor": "AMD",    "encoder": "av1_amf" }
+      ]
+    },
+    {
+      "label": "VP9",
+      "cpuEncoders": [ "libvpx-vp9" ],
+      "hardwareEncoders": [
+        { "vendor": "NVIDIA", "encoder": "vp9_nvenc" },
+        { "vendor": "Intel",  "encoder": "vp9_qsv" }
+      ]
+    },
+    {
+      "label": "MJPEG",
+      "cpuEncoders": [ "mjpeg" ],
+      "hardwareEncoders": [
+        { "vendor": "NVIDIA", "encoder": "mjpeg_nvenc" }
+      ]
+    },
+    {
+      "label": "MPEG-2",
+      "cpuEncoders": [ "mpeg2video" ],
+      "hardwareEncoders": [
+        { "vendor": "Intel", "encoder": "mpeg2_qsv" }
+      ]
+    }
+  ]
+}

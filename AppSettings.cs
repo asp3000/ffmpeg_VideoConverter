@@ -2,20 +2,21 @@
 //  AppSettings.cs — Simple JSON-backed settings for VideoConverter.
 //  Persists the "高速转换" / "硬件编码" check-box state, the last chosen
 //  "转换到" preset and the "保存到" target (folder / same-as-source) across runs.
+//  使用 DataContractJsonSerializer 进行 (de)serialization，替代旧版 Regex 解析。
 // ============================================================================
 
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Json;
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace VideoConverter
 {
     /// <summary>
-    /// Tiny settings store saved next to the executable as a JSON file.
-    /// Only primitive values are kept so (de)serialization stays dependency-free.
+    /// 设置持久化存储，保存在 EXE 同目录的 videoconverter.settings.json。
+    /// 仅保存基本类型值，(de)serialization 不依赖第三方库。
     /// </summary>
     public static class AppSettings
     {
@@ -36,39 +37,58 @@ namespace VideoConverter
         /// <summary>曾经选择过的输出目录历史（追加到下拉项中）。</summary>
         public static List<string> SaveToFolders { get; set; } = new List<string>();
 
+        /// <summary>是否保留章节标记（单文件保留源章节，合并时以文件名生成章节）。默认 true。</summary>
+        public static bool KeepChapterMarkers { get; set; } = true;
+
+        /// <summary>可序列化的设置数据容器。</summary>
+        [DataContract]
+        private class SettingsData
+        {
+            [DataMember] public bool HighSpeed { get; set; }
+            [DataMember] public bool Hardware { get; set; }
+            [DataMember] public string ConvertToFormatId { get; set; }
+            [DataMember] public string ConvertToPresetName { get; set; }
+            [DataMember] public string SaveToValue { get; set; }
+            [DataMember(Name = "SaveToFolders")]
+            public List<string> SaveToFolders { get; set; }
+            [DataMember] public bool KeepChapterMarkers { get; set; } = true;
+        }
+
+        private static readonly DataContractJsonSerializer Serializer =
+            new DataContractJsonSerializer(typeof(SettingsData));
+
         public static void Load()
         {
             try
             {
                 if (!File.Exists(FilePath)) return;
                 string json = File.ReadAllText(FilePath, Encoding.UTF8);
-
-                var m = Regex.Match(json, "\"HighSpeed\"\\s*:\\s*(true|false)", RegexOptions.IgnoreCase);
-                if (m.Success) HighSpeed = string.Equals(m.Groups[1].Value, "true", StringComparison.OrdinalIgnoreCase);
-                m = Regex.Match(json, "\"Hardware\"\\s*:\\s*(true|false)", RegexOptions.IgnoreCase);
-                if (m.Success) Hardware = string.Equals(m.Groups[1].Value, "true", StringComparison.OrdinalIgnoreCase);
-
-                ConvertToFormatId = ReadString(json, "ConvertToFormatId");
-                ConvertToPresetName = ReadString(json, "ConvertToPresetName");
-                SaveToValue = ReadString(json, "SaveToValue");
-
-                var fm = Regex.Match(json, "\"SaveToFolders\"\\s*:\\s*\"([^\"]*)\"", RegexOptions.IgnoreCase | RegexOptions.Singleline);
-                SaveToFolders = fm.Success
-                    ? fm.Groups[1].Value
-                        .Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(x => x.Replace("\\\"", "\"").Replace("\\\\", "\\"))
-                        .ToList()
-                    : new List<string>();
+                SettingsData data = null;
+                using (var ms = new MemoryStream(Encoding.UTF8.GetBytes(json)))
+                {
+                    data = Serializer.ReadObject(ms) as SettingsData;
+                }
+                if (data != null)
+                {
+                    HighSpeed = data.HighSpeed;
+                    Hardware = data.Hardware;
+                    ConvertToFormatId = data.ConvertToFormatId;
+                    ConvertToPresetName = data.ConvertToPresetName;
+                    SaveToValue = data.SaveToValue;
+                    SaveToFolders = data.SaveToFolders ?? new List<string>();
+                    KeepChapterMarkers = data.KeepChapterMarkers;
+                }
             }
             catch
             {
-                // Corrupt or unreadable settings: fall back to defaults.
+                // 损坏或不可读的设置文件：回退到默认值。
                 HighSpeed = false;
                 Hardware = false;
                 ConvertToFormatId = null;
                 ConvertToPresetName = null;
                 SaveToValue = null;
                 SaveToFolders = new List<string>();
+                KeepChapterMarkers = true;
             }
         }
 
@@ -76,37 +96,29 @@ namespace VideoConverter
         {
             try
             {
-                var sb = new StringBuilder();
-                sb.Append("{\n");
-                sb.Append("  \"HighSpeed\": ").Append(HighSpeed ? "true" : "false").Append(",\n");
-                sb.Append("  \"Hardware\": ").Append(Hardware ? "true" : "false").Append(",\n");
-                sb.Append("  \"ConvertToFormatId\": \"").Append(Escape(ConvertToFormatId)).Append("\",\n");
-                sb.Append("  \"ConvertToPresetName\": \"").Append(Escape(ConvertToPresetName)).Append("\",\n");
-                sb.Append("  \"SaveToValue\": \"").Append(Escape(SaveToValue)).Append("\",\n");
-                sb.Append("  \"SaveToFolders\": \"").Append(string.Join("\n", SaveToFolders.Select(Escape))).Append("\"\n");
-                sb.Append("}");
+                var data = new SettingsData
+                {
+                    HighSpeed = HighSpeed,
+                    Hardware = Hardware,
+                    ConvertToFormatId = ConvertToFormatId,
+                    ConvertToPresetName = ConvertToPresetName,
+                    SaveToValue = SaveToValue,
+                    SaveToFolders = SaveToFolders,
+                    KeepChapterMarkers = KeepChapterMarkers
+                };
                 string dir = Path.GetDirectoryName(FilePath);
                 if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
-                File.WriteAllText(FilePath, sb.ToString(), Encoding.UTF8);
+                using (var ms = new MemoryStream())
+                {
+                    Serializer.WriteObject(ms, data);
+                    File.WriteAllText(FilePath, Encoding.UTF8.GetString(ms.ToArray()), Encoding.UTF8);
+                }
             }
             catch
             {
-                // Best-effort persistence; ignore write failures.
+                // 尽力持久化；写入失败时忽略。
             }
-        }
-
-        private static string ReadString(string json, string key)
-        {
-            var m = Regex.Match(json, "\"" + key + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"", RegexOptions.IgnoreCase);
-            if (!m.Success) return null;
-            return m.Groups[1].Value.Replace("\\\"", "\"").Replace("\\\\", "\\");
-        }
-
-        private static string Escape(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return "";
-            return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
     }
 }
