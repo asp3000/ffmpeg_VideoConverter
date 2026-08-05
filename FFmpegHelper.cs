@@ -558,43 +558,60 @@ namespace VideoConverter
             if (!File.Exists(FFmpegPath))
                 throw new FileNotFoundException("ffmpeg.exe not found.", FFmpegPath);
 
-            return await RunUnderGlobalConcurrencyAsync(async () =>
+            return await RunUnderGlobalConcurrencyAsync(
+                () => ExtractPngFrameAsync(filePath, ms / 1000.0, width, height, 0));
+        }
+
+        /// <summary>
+        /// 单帧 PNG 管道提取的公共核心（GetFrameAtTimeAsync 与 GetThumbnailAsync 共用）。
+        /// timeoutMs &gt; 0 时设置上限，避免个别封装（rm/rmvb）让 ffmpeg 卡死。
+        /// </summary>
+        private static async Task<Image> ExtractPngFrameAsync(string filePath, double seconds, int width, int height, int timeoutMs)
+        {
+            // width/height &lt;= 0 时不指定 -s，保持原始分辨率，由调用方用 SizeMode=Zoom 缩放显示。
+            string sizeArg = (width > 0 && height > 0)
+                ? string.Format(CultureInfo.InvariantCulture, " -s {0}x{1}", width, height)
+                : "";
+            string ss = seconds.ToString("0.000", CultureInfo.InvariantCulture);
+            string tag = ProcessGuard.MakeTag(out string tempFile);
+            var psi = new ProcessStartInfo
             {
-                string tag = ProcessGuard.MakeTag(out string tempFile);
-                // 当 width/height <= 0 时不指定 -s，保持原始分辨率与宽高比，由调用方用 SizeMode=Zoom 缩放显示。
-                string sizeArg = (width > 0 && height > 0)
-                    ? string.Format(CultureInfo.InvariantCulture, " -s {0}x{1}", width, height)
-                    : "";
-                var psi = new ProcessStartInfo
+                FileName = FFmpegPath,
+                Arguments = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "-nostdin -ss {0} -i \"{1}\" -vframes 1{2} -f image2pipe -vcodec png - {3}",
+                    ss, filePath, sizeArg, tag),
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using (var proc = new Process { StartInfo = psi, EnableRaisingEvents = true })
+            {
+                var tcs = new TaskCompletionSource<object>();
+                proc.Exited += (s, e) => tcs.TrySetResult(null);
+                proc.Start();
+                ProcessGuard.Register(proc, tempFile);
+
+                var msStream = new MemoryStream();
+                var copyTask = proc.StandardOutput.BaseStream.CopyToAsync(msStream);
+
+                Task winner = timeoutMs > 0
+                    ? await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs)).ConfigureAwait(false)
+                    : tcs.Task;
+                if (timeoutMs > 0 && winner != tcs.Task)
                 {
-                    FileName = FFmpegPath,
-                    Arguments = string.Format(
-                        CultureInfo.InvariantCulture,
-                        "-nostdin -ss {0:0.000} -i \"{1}\" -vframes 1{2} -f image2pipe -vcodec png - {3}",
-                        ms / 1000.0, filePath, sizeArg, tag),
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                using (var proc = new Process { StartInfo = psi, EnableRaisingEvents = true })
-                {
-                    var tcs = new TaskCompletionSource<object>();
-                    proc.Exited += (s, e) => tcs.TrySetResult(null);
-                    proc.Start();
-                    ProcessGuard.Register(proc, tempFile);
-
-                    var msStream = new MemoryStream();
-                    await proc.StandardOutput.BaseStream.CopyToAsync(msStream).ConfigureAwait(false);
-                    await tcs.Task.ConfigureAwait(false);
-
-                    if (msStream.Length == 0) return (Image)null;
-                    msStream.Position = 0;
-                    using (var temp = Image.FromStream(msStream))
-                        return new Bitmap(temp);
+                    try { proc.Kill(); } catch { }
+                    return null;
                 }
-            });
+
+                await copyTask.ConfigureAwait(false);
+                if (msStream.Length == 0) return null;
+                msStream.Position = 0;
+                using (var temp = Image.FromStream(msStream))
+                    return new Bitmap(temp);
+            }
         }
 
         /// <summary>
@@ -651,49 +668,9 @@ namespace VideoConverter
             if (!File.Exists(FFmpegPath))
                 throw new FileNotFoundException("ffmpeg.exe not found.", FFmpegPath);
 
-            return await RunUnderGlobalConcurrencyAsync(async () =>
-            {
-                string tag = ProcessGuard.MakeTag(out string tempFile);
-                var psi = new ProcessStartInfo
-                {
-                    FileName = FFmpegPath,
-                    Arguments = string.Format(
-                        "-nostdin -ss 00:00:01 -i \"{0}\" -vframes 1 -s {1}x{2} -f image2pipe -vcodec png - {3}",
-                        filePath, width, height, tag),
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                using (var proc = new Process { StartInfo = psi, EnableRaisingEvents = true })
-                {
-                    var tcs = new TaskCompletionSource<object>();
-                    proc.Exited += (s, e) => tcs.TrySetResult(null);
-                    proc.Start();
-                    ProcessGuard.Register(proc, tempFile);
-
-                    var ms = new MemoryStream();
-                    var copyTask = proc.StandardOutput.BaseStream.CopyToAsync(ms);
-
-                    // 10 秒超时：某些格式（如 rm/rmvb）可能让 ffmpeg 缩略图提取卡死。
-                    var winner = await Task.WhenAny(tcs.Task, Task.Delay(10000));
-                    if (winner != tcs.Task)
-                    {
-                        try { proc.Kill(); } catch { }
-                        return (Image)null;
-                    }
-
-                    await copyTask.ConfigureAwait(false);
-
-                    if (ms.Length == 0) return (Image)null;
-                    ms.Position = 0;
-
-                    // Copy into a Bitmap so the underlying stream can be disposed.
-                    using (var temp = Image.FromStream(ms))
-                        return new Bitmap(temp);
-                }
-            });
+            // 固定 1 秒处取帧；10 秒超时避免个别封装卡死 ffmpeg。
+            return await RunUnderGlobalConcurrencyAsync(
+                () => ExtractPngFrameAsync(filePath, 1.0, width, height, 10000));
         }
 
         #region Bitrate control (CBR / VBR / quality)

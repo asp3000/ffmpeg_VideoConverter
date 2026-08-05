@@ -15,6 +15,7 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -261,7 +262,10 @@ namespace VideoConverter
         private void RaiseFrame(FrameDecodedEventArgs e)
         {
             if (_sync != null)
-                _sync.Post(_ => { FrameDecoded?.Invoke(this, e); PositionChanged?.Invoke(this, EventArgs.Empty); }, null);
+            {
+                try { _sync.Post(_ => { FrameDecoded?.Invoke(this, e); PositionChanged?.Invoke(this, EventArgs.Empty); }, null); }
+                catch { }
+            }
             else
             {
                 FrameDecoded?.Invoke(this, e);
@@ -271,13 +275,21 @@ namespace VideoConverter
 
         private void RaisePositionChanged()
         {
-            if (_sync != null) _sync.Post(_ => PositionChanged?.Invoke(this, EventArgs.Empty), null);
+            if (_sync != null)
+            {
+                try { _sync.Post(_ => PositionChanged?.Invoke(this, EventArgs.Empty), null); }
+                catch { }
+            }
             else PositionChanged?.Invoke(this, EventArgs.Empty);
         }
 
         private void RaisePlaybackEnded()
         {
-            if (_sync != null) _sync.Post(_ => PlaybackEnded?.Invoke(this, EventArgs.Empty), null);
+            if (_sync != null)
+            {
+                try { _sync.Post(_ => PlaybackEnded?.Invoke(this, EventArgs.Empty), null); }
+                catch { }
+            }
             else PlaybackEnded?.Invoke(this, EventArgs.Empty);
         }
 

@@ -63,9 +63,11 @@ namespace VideoConverter
         private int _undoPos = -1;
 
         private long _currentTimeMs;
-        private bool _isPlaying;
         private long _totalMs;
-        private long _frameIntervalMs;
+        private long _frameIntervalMs;   // step size for frame stepping
+        private VideoPreviewEngine _engine;
+        private int _decodeW, _decodeH;  // preview decode resolution
+        private bool _initialFramesDone;
 
         private List<long> _keyframes = new List<long>();
         private List<Image> _thumbnails = new List<Image>();
@@ -74,7 +76,6 @@ namespace VideoConverter
         private CropRegion _crop;
         private int _rotation;
 
-        private CancellationTokenSource _playCts;
         private bool _seeking;
 
         // ---- controls ---------------------------------------------------------
@@ -144,6 +145,8 @@ namespace VideoConverter
         private Label lblWmScaleVal;
         private TrackBar trackEffectHead;
         private Button btnEffectPlay;
+        private TrackBar trackSubHead;
+        private Button btnSubPlay;
 
         // subtitle tab
         private ComboBox cmbSubTrack;
@@ -547,7 +550,7 @@ namespace VideoConverter
             y += 22;
             trkSpeed = new TrackBar { Location = new Point(rightX, y), Size = new Size(rightW - valW, 40), Minimum = 25, Maximum = 400, Value = (int)(Speed * 100), TickStyle = TickStyle.None };
             lblSpeedVal = new Label { Location = new Point(rightX + rightW - valW, y + 8), Size = new Size(valW, 20), TextAlign = ContentAlignment.MiddleRight };
-            trkSpeed.ValueChanged += (s, e) => { Speed = trkSpeed.Value / 100.0; lblSpeedVal.Text = Speed.ToString("F2") + "x"; RefreshEffectPreview(); };
+            trkSpeed.ValueChanged += (s, e) => { Speed = trkSpeed.Value / 100.0; lblSpeedVal.Text = Speed.ToString("F2") + "x"; RequestRefresh(); };
             tabEffects.Controls.Add(trkSpeed);
             tabEffects.Controls.Add(lblSpeedVal);
             y += 48;
@@ -557,7 +560,7 @@ namespace VideoConverter
             y += 22;
             trkBrightness = new TrackBar { Location = new Point(rightX, y), Size = new Size(rightW - valW, 40), Minimum = -100, Maximum = 100, Value = (int)Brightness, TickStyle = TickStyle.None };
             lblBrightVal = new Label { Location = new Point(rightX + rightW - valW, y + 8), Size = new Size(valW, 20), TextAlign = ContentAlignment.MiddleRight };
-            trkBrightness.ValueChanged += (s, e) => { Brightness = trkBrightness.Value; lblBrightVal.Text = Brightness.ToString(); RefreshEffectPreview(); };
+            trkBrightness.ValueChanged += (s, e) => { Brightness = trkBrightness.Value; lblBrightVal.Text = Brightness.ToString(); RequestRefresh(); };
             tabEffects.Controls.Add(trkBrightness);
             tabEffects.Controls.Add(lblBrightVal);
             y += 48;
@@ -567,7 +570,7 @@ namespace VideoConverter
             y += 22;
             trkContrast = new TrackBar { Location = new Point(rightX, y), Size = new Size(rightW - valW, 40), Minimum = 0, Maximum = 200, Value = (int)(Contrast * 100), TickStyle = TickStyle.None };
             lblContrastVal = new Label { Location = new Point(rightX + rightW - valW, y + 8), Size = new Size(valW, 20), TextAlign = ContentAlignment.MiddleRight };
-            trkContrast.ValueChanged += (s, e) => { Contrast = trkContrast.Value / 100.0; lblContrastVal.Text = Contrast.ToString("F2"); RefreshEffectPreview(); };
+            trkContrast.ValueChanged += (s, e) => { Contrast = trkContrast.Value / 100.0; lblContrastVal.Text = Contrast.ToString("F2"); RequestRefresh(); };
             tabEffects.Controls.Add(trkContrast);
             tabEffects.Controls.Add(lblContrastVal);
             y += 48;
@@ -577,7 +580,7 @@ namespace VideoConverter
             y += 22;
             trkSaturation = new TrackBar { Location = new Point(rightX, y), Size = new Size(rightW - valW, 40), Minimum = 0, Maximum = 200, Value = (int)(Saturation * 100), TickStyle = TickStyle.None };
             lblSatVal = new Label { Location = new Point(rightX + rightW - valW, y + 8), Size = new Size(valW, 20), TextAlign = ContentAlignment.MiddleRight };
-            trkSaturation.ValueChanged += (s, e) => { Saturation = trkSaturation.Value / 100.0; lblSatVal.Text = Saturation.ToString("F2"); RefreshEffectPreview(); };
+            trkSaturation.ValueChanged += (s, e) => { Saturation = trkSaturation.Value / 100.0; lblSatVal.Text = Saturation.ToString("F2"); RequestRefresh(); };
             tabEffects.Controls.Add(trkSaturation);
             tabEffects.Controls.Add(lblSatVal);
             y += 60;
@@ -594,7 +597,7 @@ namespace VideoConverter
             btnWatermarkBrowse.Click += (s, e) =>
             {
                 using (var dlg = new OpenFileDialog { Filter = "图片文件|*.png;*.jpg;*.jpeg;*.bmp;*.gif" })
-                { if (dlg.ShowDialog() == DialogResult.OK) { txtWatermark.Text = dlg.FileName; WatermarkPath = dlg.FileName; RefreshEffectPreview(); } }
+                { if (dlg.ShowDialog() == DialogResult.OK) { txtWatermark.Text = dlg.FileName; WatermarkPath = dlg.FileName; RequestRefresh(); } }
             };
             grpWm.Controls.Add(btnWatermarkBrowse);
             wy += 28;
@@ -628,7 +631,7 @@ namespace VideoConverter
                             b.ForeColor = tg == WatermarkPosition ? Color.White : Color.FromArgb(45, 45, 45);
                         }
                     }
-                    RefreshEffectPreview();
+                    RequestRefresh();
                 };
                 grpWm.Controls.Add(btn);
             }
@@ -638,7 +641,7 @@ namespace VideoConverter
             grpWm.Controls.Add(lblWmOpacity);
             trkWatermarkOpacity = new TrackBar { Location = new Point(68, wy), Size = new Size(130, 30), Minimum = 0, Maximum = 100, Value = (int)(WatermarkOpacity * 100), TickStyle = TickStyle.None };
             lblWmOpacityVal = new Label { Text = ((int)(WatermarkOpacity * 100)) + "%", Location = new Point(202, wy + 2), Size = new Size(45, 20) };
-            trkWatermarkOpacity.ValueChanged += (s, e) => { WatermarkOpacity = trkWatermarkOpacity.Value / 100.0; lblWmOpacityVal.Text = trkWatermarkOpacity.Value + "%"; RefreshEffectPreview(); };
+            trkWatermarkOpacity.ValueChanged += (s, e) => { WatermarkOpacity = trkWatermarkOpacity.Value / 100.0; lblWmOpacityVal.Text = trkWatermarkOpacity.Value + "%"; RequestRefresh(); };
             grpWm.Controls.Add(trkWatermarkOpacity);
             grpWm.Controls.Add(lblWmOpacityVal);
             wy += 36;
@@ -647,26 +650,9 @@ namespace VideoConverter
             grpWm.Controls.Add(lblWmScale);
             trkWatermarkScale = new TrackBar { Location = new Point(68, wy), Size = new Size(130, 30), Minimum = 0, Maximum = 100, Value = (int)WatermarkScalePercent, TickStyle = TickStyle.None };
             lblWmScaleVal = new Label { Text = WatermarkScalePercent == 0 ? "自动" : WatermarkScalePercent + "%", Location = new Point(202, wy + 2), Size = new Size(45, 20) };
-            trkWatermarkScale.ValueChanged += (s, e) => { WatermarkScalePercent = trkWatermarkScale.Value; lblWmScaleVal.Text = WatermarkScalePercent == 0 ? "自动" : WatermarkScalePercent + "%"; RefreshEffectPreview(); };
+            trkWatermarkScale.ValueChanged += (s, e) => { WatermarkScalePercent = trkWatermarkScale.Value; lblWmScaleVal.Text = WatermarkScalePercent == 0 ? "自动" : WatermarkScalePercent + "%"; RequestRefresh(); };
             grpWm.Controls.Add(trkWatermarkScale);
             grpWm.Controls.Add(lblWmScaleVal);
-        }
-
-        /// <summary>使用 ColorMatrix 实时调整预览图像（按当前播放头时间取帧）。</summary>
-        private async void RefreshEffectPreview()
-        {
-            if (picEffectPreview == null || string.IsNullOrEmpty(InputPath)) return;
-            try
-            {
-                int fw = SourceWidth > 0 ? SourceWidth : 1280;
-                int fh = SourceHeight > 0 ? SourceHeight : 720;
-                var img = await FFmpegHelper.GetFrameAtTimeAsync(InputPath, _currentTimeMs, fw, fh);
-                if (img == null) return;
-                var result = ApplyColorMatrix(new Bitmap(img));
-                img.Dispose();
-                SwapImage(picEffectPreview, result);
-            }
-            catch { }
         }
 
         private Bitmap ApplyColorMatrix(Bitmap src)
@@ -883,11 +869,27 @@ namespace VideoConverter
             {
                 Location = new Point(margin + 440, 20),
                 Size = new Size(520, 340),
-                BackColor = Color.FromArgb(80, 80, 80),
-                SizeMode = PictureBoxSizeMode.Normal
+                BackColor = Color.FromArgb(40, 40, 40),
+                SizeMode = PictureBoxSizeMode.Zoom
             };
-            picSubPreview.Paint += (s, e) => PaintSubtitlePreview(e, picSubPreview);
             tabSubtitle.Controls.Add(picSubPreview);
+
+            // 字幕页签视频播放控制（与裁剪/效果页签共用预览引擎，可在视频画面上叠加字幕预览）
+            int subPlayY = 20 + 340 + 12;
+            trackSubHead = new TrackBar
+            {
+                Location = new Point(margin + 440, subPlayY),
+                Size = new Size(420, 30),
+                Minimum = 0,
+                Maximum = 1000,
+                TickStyle = TickStyle.None
+            };
+            trackSubHead.ValueChanged += (s, e) => TrackSeek(trackSubHead);
+            tabSubtitle.Controls.Add(trackSubHead);
+
+            btnSubPlay = CreateIconButton("▶", margin + 440 + 430, subPlayY, 60, 32, "播放/停止");
+            btnSubPlay.Click += (s, e) => TogglePlay();
+            tabSubtitle.Controls.Add(btnSubPlay);
 
             // ---- 底部按钮：应用 / 应用到全部 / 保存 / 保存为默认 ----
             int btnY = grpBg.Location.Y + grpBg.Height + 16;
@@ -952,11 +954,11 @@ namespace VideoConverter
             };
             tabSubtitle.Controls.Add(btnSaveDefaultSub);
 
-            // Update preview on change
+            // Update preview on change（字幕绘制在视频帧上，变化后刷新当前帧）
             EventHandler updatePreview = (s, e) =>
             {
                 SyncSubSettings();
-                picSubPreview.Invalidate();
+                RequestRefresh();
             };
             cmbFontName.SelectedIndexChanged += updatePreview;
             numFontSize.ValueChanged += updatePreview;
@@ -994,57 +996,60 @@ namespace VideoConverter
             SubSettings.ExternalSubPath = string.IsNullOrWhiteSpace(txtExternalSub.Text) ? null : txtExternalSub.Text.Trim();
         }
 
-        private void PaintSubtitlePreview(PaintEventArgs e, Control ctrl)
+        /// <summary>把字幕预览叠加绘制到视频帧位图上（字幕设置按源分辨率等比缩放到预览分辨率）。</summary>
+        private void DrawSubtitleOntoBitmap(Bitmap bmp)
         {
-            var g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var bg = new SolidBrush(Color.FromArgb(80, 80, 80)))
-                g.FillRectangle(bg, ctrl.ClientRectangle);
-
+            if (bmp == null) return;
+            float scale = SafeSrcH() > 0 ? (float)bmp.Height / SafeSrcH() : 1f;
             string sample = "字幕预览示例文本";
-            float fontSize = (float)numFontSize.Value;
+            float fontSize = Math.Max(4f, (float)numFontSize.Value * scale);
             FontStyle fs = FontStyle.Regular;
             if (chkBold.Checked) fs |= FontStyle.Bold;
             if (chkItalic.Checked) fs |= FontStyle.Italic;
             if (chkUnderline.Checked) fs |= FontStyle.Underline;
-            Font font;
-            try { font = new Font(cmbFontName.Text, fontSize, fs, GraphicsUnit.Pixel); }
-            catch { font = new Font("Arial", fontSize, fs, GraphicsUnit.Pixel); }
-            using (font)
+
+            using (var g = Graphics.FromImage(bmp))
             {
-                var sz = g.MeasureString(sample, font);
-                int align = cmbAlignment.SelectedIndex + 1;
-                int col = (align - 1) % 3, row = 2 - (align - 1) / 3;
-                float mx = col == 0 ? 16 : col == 1 ? (ctrl.Width - sz.Width) / 2 : ctrl.Width - sz.Width - 16;
-                float my = row == 0 ? 16 : row == 1 ? (ctrl.Height - sz.Height) / 2 : ctrl.Height - sz.Height - (float)numMarginV.Value - 16;
-
-                int alpha = Math.Max(0, Math.Min(255, 255 * (int)numTransparency.Value / 100));
-                Color fc = Color.FromArgb(alpha, pnlFontColor.BackColor.R, pnlFontColor.BackColor.G, pnlFontColor.BackColor.B);
-
-                if (chkBackEnabled.Checked)
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                Font font;
+                try { font = new Font(cmbFontName.Text, fontSize, fs, GraphicsUnit.Pixel); }
+                catch { font = new Font("Arial", fontSize, fs, GraphicsUnit.Pixel); }
+                using (font)
                 {
-                    int ba = Math.Max(0, Math.Min(255, 255 * (100 - (int)numBackAlpha.Value) / 100));
-                    using (var bgBrush = new SolidBrush(Color.FromArgb(ba, pnlBackColor.BackColor.R, pnlBackColor.BackColor.G, pnlBackColor.BackColor.B)))
-                        g.FillRectangle(bgBrush, mx - 2, my - 2, sz.Width + 4, sz.Height + 4);
-                }
+                    var sz = g.MeasureString(sample, font);
+                    int align = cmbAlignment.SelectedIndex + 1;
+                    int col = (align - 1) % 3, row = 2 - (align - 1) / 3;
+                    float mx = col == 0 ? 16 * scale : col == 1 ? (bmp.Width - sz.Width) / 2 : bmp.Width - sz.Width - 16 * scale;
+                    float my = row == 0 ? 16 * scale : row == 1 ? (bmp.Height - sz.Height) / 2 : bmp.Height - sz.Height - (float)numMarginV.Value * scale - 16 * scale;
 
-                int ow = (int)numOutlineW.Value;
-                if (ow > 0)
-                {
-                    Color oc = pnlOutlineColor.BackColor;
-                    using (var ob = new SolidBrush(Color.FromArgb(alpha, oc.R, oc.G, oc.B)))
+                    int alpha = Math.Max(0, Math.Min(255, 255 * (int)numTransparency.Value / 100));
+                    Color fc = Color.FromArgb(alpha, pnlFontColor.BackColor.R, pnlFontColor.BackColor.G, pnlFontColor.BackColor.B);
+
+                    if (chkBackEnabled.Checked)
                     {
-                        for (int dx = -ow; dx <= ow; dx += Math.Max(1, ow))
-                            for (int dy = -ow; dy <= ow; dy += Math.Max(1, ow))
-                            {
-                                if (dx == 0 && dy == 0) continue;
-                                g.DrawString(sample, font, ob, mx + dx, my + dy);
-                            }
+                        int ba = Math.Max(0, Math.Min(255, 255 * (100 - (int)numBackAlpha.Value) / 100));
+                        using (var bgBrush = new SolidBrush(Color.FromArgb(ba, pnlBackColor.BackColor.R, pnlBackColor.BackColor.G, pnlBackColor.BackColor.B)))
+                            g.FillRectangle(bgBrush, mx - 2, my - 2, sz.Width + 4, sz.Height + 4);
                     }
-                }
 
-                using (var fg = new SolidBrush(fc))
-                    g.DrawString(sample, font, fg, mx, my);
+                    int ow = (int)((float)numOutlineW.Value * scale);
+                    if (ow > 0)
+                    {
+                        Color oc = pnlOutlineColor.BackColor;
+                        using (var ob = new SolidBrush(Color.FromArgb(alpha, oc.R, oc.G, oc.B)))
+                        {
+                            for (int dx = -ow; dx <= ow; dx += Math.Max(1, ow))
+                                for (int dy = -ow; dy <= ow; dy += Math.Max(1, ow))
+                                {
+                                    if (dx == 0 && dy == 0) continue;
+                                    g.DrawString(sample, font, ob, mx + dx, my + dy);
+                                }
+                        }
+                    }
+
+                    using (var fg = new SolidBrush(fc))
+                        g.DrawString(sample, font, fg, mx, my);
+                }
             }
         }
 
@@ -1185,6 +1190,19 @@ namespace VideoConverter
                     _crop = new CropRegion { X = 0, Y = 0, Width = SourceWidth, Height = SourceHeight };
                 UpdateCropInputs();
 
+                // ---- 预览引擎（连续解码，替代逐帧 GetFrameAtTimeAsync）----
+                _engine = new VideoPreviewEngine(InputPath, 720);
+                _engine.SourceWidth = SourceWidth;
+                _engine.SourceHeight = SourceHeight;
+                _engine.DurationSec = SourceDurationSeconds;
+                _engine.FrameRate = info != null && info.FrameRate > 0 ? info.FrameRate : 25;
+                _engine.ComputeFrameSize();
+                _decodeW = _engine.FrameWidth;
+                _decodeH = _engine.FrameHeight;
+                _engine.FrameDecoded += OnEngineFrame;
+                _engine.PositionChanged += OnEnginePosition;
+                _engine.PlaybackEnded += OnEngineEnded;
+
                 // Init effects controls
                 trkSpeed.Value = (int)(Speed * 100);
                 trkBrightness.Value = (int)Brightness;
@@ -1229,10 +1247,9 @@ namespace VideoConverter
                 _keyframes = await FFmpegHelper.GetKeyframesAsync(InputPath);
                 await ExtractThumbnailsAsync();
 
-                // 初始渲染：保证各页签都有首帧图像（裁剪纸框交互依赖 picCropPreview.Image 非空）
-                await RenderInitialFrameAsync();
-                UpdateCropOutputPreview();
-                RefreshEffectPreview();
+                // 初始渲染：通过预览引擎发射首帧，保证各页签都有图像可用（裁剪纸框交互依赖 picCropPreview.Image 非空）
+                _initialFramesDone = false;
+                _engine.RefreshCurrentFrame();
                 panelTimeline.Invalidate();
 
                 // 应用调用方指定的起始页签（修正：之前未生效，导致字幕弹窗总停在剪切页）
@@ -1247,10 +1264,8 @@ namespace VideoConverter
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            StopPlay();
-            _playCts?.Cancel();
-            _playCts?.Dispose();
-            _playCts = null;
+            try { _engine?.Dispose(); } catch { }
+            _engine = null;
             foreach (var img in _thumbnails) img?.Dispose();
             _thumbnails.Clear();
             base.OnFormClosing(e);
@@ -1291,10 +1306,10 @@ namespace VideoConverter
             return tb;
         }
 
+        // 复用 FFmpegHelper.FormatDuration，避免与转换器其它模块重复时间格式化逻辑。
         private string FormatTime(long ms)
         {
-            var ts = TimeSpan.FromMilliseconds(ms);
-            return string.Format("{0:D2}:{1:D2}:{2:D2}.{3:D3}", ts.Hours, ts.Minutes, ts.Seconds, ts.Milliseconds);
+            return FFmpegHelper.FormatDuration(ms / 1000.0);
         }
 
         private void UpdateTimeLabel()
@@ -1317,98 +1332,98 @@ namespace VideoConverter
 
         private void TogglePlay()
         {
-            if (_isPlaying) StopPlay();
-            else StartPlay();
+            if (_engine == null) return;
+            _engine.TogglePlay();
+            SyncPlayButtons();
         }
 
-        private void StartPlay()
+        private void SyncPlayButtons()
         {
-            if (_isPlaying || _totalMs <= 0) return;
-            _isPlaying = true;
-            SetPlayButtons(true);
-            PlayLoop();
-        }
-
-        private void StopPlay()
-        {
-            _isPlaying = false;
-            _playCts?.Cancel();
-            SetPlayButtons(false);
-        }
-
-        private void SetPlayButtons(bool playing)
-        {
-            string t = playing ? "⏸" : "▶";
+            string t = (_engine != null && _engine.IsPlaying) ? "⏸" : "▶";
             if (btnPlay != null) btnPlay.Text = t;
             if (btnCropPlay != null) btnCropPlay.Text = t;
             if (btnEffectPlay != null) btnEffectPlay.Text = t;
+            if (btnSubPlay != null) btnSubPlay.Text = t;
         }
 
-        private async void PlayLoop()
-        {
-            _playCts = new CancellationTokenSource();
-            var ct = _playCts.Token;
-            try
-            {
-                while (_isPlaying && !ct.IsCancellationRequested)
-                {
-                    if (_currentTimeMs >= _totalMs)
-                    {
-                        _currentTimeMs = _totalMs;
-                        SyncTimeUi();
-                        StopPlay();
-                        break;
-                    }
-                    await RenderCurrentFrameAsync();
-                    if (ct.IsCancellationRequested) break;
-                    SyncTimeUi();
-                    UpdateTimelineSelectionFromTime();
-                    _currentTimeMs = Math.Min(_totalMs, _currentTimeMs + _frameIntervalMs);
-                }
-            }
-            catch { }
-            finally
-            {
-                try { _playCts?.Dispose(); } catch { }
-                _playCts = null;
-            }
-        }
-
-        /// <summary>按当前页签渲染一帧视频（裁剪页签同时刷新输出预览）。</summary>
-        private async Task RenderCurrentFrameAsync()
+        /// <summary>引擎在 UI 线程上回调：按当前页签渲染解码帧（并附带各页签专属处理）。</summary>
+        private void OnEngineFrame(object sender, VideoPreviewEngine.FrameDecodedEventArgs e)
         {
             try
             {
-                if (string.IsNullOrEmpty(InputPath)) return;
+                if (e.Rgb24 == null) return;
+                var bmp = Rgb24Convert.ToBitmap(e.Rgb24, e.Width, e.Height);
                 var tab = tabControl.SelectedTab;
-                int fw = SourceWidth > 0 ? SourceWidth : 1280;
-                int fh = SourceHeight > 0 ? SourceHeight : 720;
-                var img = await FFmpegHelper.GetFrameAtTimeAsync(InputPath, _currentTimeMs, fw, fh);
-                if (img == null) return;
 
-                if (tab == tabEffects)
+                if (tab == tabCrop)
                 {
-                    var result = ApplyColorMatrix(new Bitmap(img));
-                    img.Dispose();
+                    SwapImage(picCropPreview, bmp);
+                    picCropPreview.Invalidate(); // 叠加裁剪框
+                    var cropped = CropAndRotateBitmap(picCropPreview.Image as Bitmap ?? bmp, _crop, _rotation);
+                    SwapImage(picCropOutput, cropped);
+                }
+                else if (tab == tabEffects)
+                {
+                    var result = ApplyColorMatrix(bmp);
+                    bmp.Dispose();
                     SwapImage(picEffectPreview, result);
                 }
-                else if (tab == tabCrop)
+                else if (tab == tabSubtitle)
                 {
-                    var clone = new Bitmap(img);
-                    SwapImage(picCropPreview, clone);
-                    img.Dispose();
-                    picCropPreview.Invalidate();
-                    // 用同一帧直接裁剪输出，避免播放时重复取帧
-                    var cropped = CropAndRotateBitmap(clone, _crop, _rotation);
-                    SwapImage(picCropOutput, cropped);
+                    DrawSubtitleOntoBitmap(bmp);
+                    SwapImage(picSubPreview, bmp);
                 }
                 else
                 {
-                    // 修剪页签（或未知页签）只更新主预览
-                    SwapImage(picPreview, img);
+                    SwapImage(picPreview, bmp);
+                }
+
+                // 首帧：同时喂给其它页签，保证切换时已有图像
+                if (!_initialFramesDone)
+                {
+                    _initialFramesDone = true;
+                    if (tab != tabCrop && picCropPreview != null)
+                    {
+                        var c = new Bitmap(bmp);
+                        SwapImage(picCropPreview, c);
+                        picCropPreview.Invalidate();
+                        SwapImage(picCropOutput, CropAndRotateBitmap(c, _crop, _rotation));
+                    }
+                    if (tab != tabEffects && picEffectPreview != null)
+                        SwapImage(picEffectPreview, ApplyColorMatrix(new Bitmap(bmp)));
+                    if (tab != tabSubtitle && picSubPreview != null)
+                    {
+                        var sb = new Bitmap(bmp);
+                        DrawSubtitleOntoBitmap(sb);
+                        SwapImage(picSubPreview, sb);
+                    }
                 }
             }
             catch { }
+        }
+
+        private void OnEnginePosition(object sender, EventArgs e)
+        {
+            if (_engine == null) return;
+            _currentTimeMs = (long)(_engine.PositionSec * 1000);
+            SyncTimeUi();
+        }
+
+        private void OnEngineEnded(object sender, EventArgs e)
+        {
+            SyncPlayButtons();
+            if (_engine != null)
+            {
+                _currentTimeMs = (long)(_engine.PositionSec * 1000);
+                SyncTimeUi();
+            }
+        }
+
+        /// <summary>暂停状态下滑块/参数变化时刷新当前帧（播放中由实时流自动更新）。</summary>
+        private void RequestRefresh()
+        {
+            if (_engine == null) return;
+            _engine.RefreshCurrentFrame();
         }
 
         private async Task ExtractThumbnailsAsync()
@@ -1433,25 +1448,6 @@ namespace VideoConverter
             _thumbnails = list;
         }
 
-        private async Task RenderInitialFrameAsync()
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(InputPath)) return;
-                int fw = SourceWidth > 0 ? SourceWidth : 1280;
-                int fh = SourceHeight > 0 ? SourceHeight : 720;
-                var img = await FFmpegHelper.GetFrameAtTimeAsync(InputPath, _currentTimeMs, fw, fh);
-                if (img == null) return;
-                SwapImage(picPreview, new Bitmap(img));
-                SwapImage(picCropPreview, new Bitmap(img));
-                picCropPreview.Invalidate();
-                var cropped = CropAndRotateBitmap((Bitmap)picCropPreview.Image, _crop, _rotation);
-                SwapImage(picCropOutput, cropped);
-                img.Dispose();
-            }
-            catch { }
-        }
-
         private void SyncTimeUi()
         {
             _seeking = true;
@@ -1459,6 +1455,7 @@ namespace VideoConverter
             if (trackHead != null) trackHead.Value = Math.Max(trackHead.Minimum, Math.Min(trackHead.Maximum, v));
             if (trackCropHead != null) trackCropHead.Value = Math.Max(trackCropHead.Minimum, Math.Min(trackCropHead.Maximum, v));
             if (trackEffectHead != null) trackEffectHead.Value = Math.Max(trackEffectHead.Minimum, Math.Min(trackEffectHead.Maximum, v));
+            if (trackSubHead != null) trackSubHead.Value = Math.Max(trackSubHead.Minimum, Math.Min(trackSubHead.Maximum, v));
             _seeking = false;
             UpdateTimeLabel();
             panelTimeline?.Invalidate();
@@ -1467,38 +1464,37 @@ namespace VideoConverter
         private void TrackSeek(TrackBar tb)
         {
             if (_seeking || tb == null) return;
-            StopPlay();
             long ms = tb.Maximum > 0 ? (long)(tb.Value * _totalMs / tb.Maximum) : 0;
             _currentTimeMs = Math.Max(0, Math.Min(_totalMs, ms));
             SyncTimeUi();
             UpdateTimelineSelectionFromTime();
-            var _ = RenderCurrentFrameAsync();
+            if (_engine != null) _engine.Seek((double)_currentTimeMs / 1000.0);
         }
 
         private void StepFrame(int dir)
         {
-            StopPlay();
-            _currentTimeMs = Math.Max(0, Math.Min(_totalMs, _currentTimeMs + dir * _frameIntervalMs));
+            if (_engine == null) return;
+            _engine.Pause();
+            long ms = (long)Math.Max(0, Math.Min(_totalMs, _currentTimeMs + dir * _frameIntervalMs));
+            _currentTimeMs = ms;
             SyncTimeUi();
             UpdateTimelineSelectionFromTime();
-            var _ = RenderCurrentFrameAsync();
+            _engine.Seek((double)ms / 1000.0);
         }
 
         private void SeekPrevKeyframe()
         {
-            StopPlay();
             long t = _keyframes.LastOrDefault(k => k < _currentTimeMs);
             if (t == 0 && _keyframes.Count > 0 && _keyframes[0] < _currentTimeMs) t = _keyframes[0];
             if (t == 0 && _currentTimeMs > 0) t = 0;
             _currentTimeMs = t;
             SyncTimeUi();
             UpdateTimelineSelectionFromTime();
-            var _ = RenderCurrentFrameAsync();
+            if (_engine != null) _engine.Seek((double)_currentTimeMs / 1000.0);
         }
 
         private void SeekNextKeyframe()
         {
-            StopPlay();
             long t = _keyframes.FirstOrDefault(k => k > _currentTimeMs);
             if (t == 0 && _keyframes.Count > 0 && _keyframes[_keyframes.Count - 1] > _currentTimeMs)
                 t = _keyframes[_keyframes.Count - 1];
@@ -1506,7 +1502,7 @@ namespace VideoConverter
             _currentTimeMs = Math.Min(_totalMs, t);
             SyncTimeUi();
             UpdateTimelineSelectionFromTime();
-            var _ = RenderCurrentFrameAsync();
+            if (_engine != null) _engine.Seek((double)_currentTimeMs / 1000.0);
         }
 
         #endregion
@@ -1661,7 +1657,7 @@ namespace VideoConverter
                 for (int i = 0; i < _segments.Count; i++) _segments[i].IsSelected = (i == idx);
                 panelTimeline.Invalidate();
             }
-            var _ = RenderCurrentFrameAsync();
+            if (_engine != null) _engine.Seek((double)_currentTimeMs / 1000.0);
         }
 
         private void UpdateTimelineSelectionFromTime()
@@ -1727,7 +1723,7 @@ namespace VideoConverter
                 _rotation = next;
             }
             picCropPreview.Invalidate();
-            UpdateCropOutputPreview();
+            RequestRefresh();
         }
 
         private void CenterCrop()
@@ -1738,7 +1734,7 @@ namespace VideoConverter
             _crop.Y = (SourceHeight - ch) / 2;
             UpdateCropInputs();
             picCropPreview.Invalidate();
-            UpdateCropOutputPreview();
+            RequestRefresh();
         }
 
         private void ApplyCropRatio(double ratio)
@@ -1772,7 +1768,7 @@ namespace VideoConverter
                 _crop.Width = Math.Max(1, Math.Min(SourceWidth - _crop.X, w));
                 _crop.Height = Math.Max(1, Math.Min(SourceHeight - _crop.Y, h));
                 picCropPreview.Invalidate();
-                UpdateCropOutputPreview();
+                RequestRefresh();
                 lblCropSize.Text = $"裁剪区域: {_crop.X},{_crop.Y} {_crop.Width}×{_crop.Height}";
             }
         }
@@ -1807,33 +1803,46 @@ namespace VideoConverter
             g.DrawRectangle(Pens.Purple, x - size / 2, y - size / 2, size, size);
         }
 
-        private Rectangle GetCropRectInPictureBox()
-        {
-            if (picCropPreview.Image == null) return Rectangle.Empty;
-            var imgSize = picCropPreview.Image.Size;
-            var boxSize = picCropPreview.ClientSize;
-            double scaleX = boxSize.Width / (double)imgSize.Width;
-            double scaleY = boxSize.Height / (double)imgSize.Height;
-            double scale = Math.Min(scaleX, scaleY);
-            int drawW = (int)(imgSize.Width * scale);
-            int drawH = (int)(imgSize.Height * scale);
-            int offX = (boxSize.Width - drawW) / 2;
-            int offY = (boxSize.Height - drawH) / 2;
+        private int SafeSrcW() => SourceWidth > 0 ? SourceWidth : _decodeW;
+        private int SafeSrcH() => SourceHeight > 0 ? SourceHeight : _decodeH;
 
-            int x = offX + (int)(_crop.X * scale);
-            int y = offY + (int)(_crop.Y * scale);
-            int w = (int)(_crop.Width * scale);
-            int h = (int)(_crop.Height * scale);
-            return new Rectangle(x, y, w, h);
+        // 显示框（Zoom 布局）像素 -> 源像素 X
+        private int BoxToSourceX(int boxX)
+        {
+            var boxSize = picCropPreview.ClientSize;
+            double scale = Math.Min(boxSize.Width / (double)_decodeW, boxSize.Height / (double)_decodeH);
+            int drawW = (int)(_decodeW * scale);
+            int offX = (boxSize.Width - drawW) / 2;
+            int pv = (int)((boxX - offX) / scale);
+            return (int)(pv * (double)SafeSrcW() / _decodeW);
+        }
+        private int BoxToSourceY(int boxY)
+        {
+            var boxSize = picCropPreview.ClientSize;
+            double scale = Math.Min(boxSize.Width / (double)_decodeW, boxSize.Height / (double)_decodeH);
+            int drawH = (int)(_decodeH * scale);
+            int offY = (boxSize.Height - drawH) / 2;
+            int pv = (int)((boxY - offY) / scale);
+            return (int)(pv * (double)SafeSrcH() / _decodeH);
         }
 
-        private double GetDisplayScale()
+        private Rectangle GetCropRectInPictureBox()
         {
-            if (picCropPreview.Image == null) return 0;
-            var imgSize = picCropPreview.Image.Size;
+            if (picCropPreview.Image == null || _decodeW <= 0 || _decodeH <= 0) return Rectangle.Empty;
+            // 源裁剪区域 -> 预览像素矩形
+            int px = (int)(_crop.X * _decodeW / (double)SafeSrcW());
+            int py = (int)(_crop.Y * _decodeH / (double)SafeSrcH());
+            int pw = (int)(_crop.Width * _decodeW / (double)SafeSrcW());
+            int ph = (int)(_crop.Height * _decodeH / (double)SafeSrcH());
+            // 预览像素矩形 -> 显示框（Zoom 布局）
             var boxSize = picCropPreview.ClientSize;
-            if (imgSize.Width <= 0 || imgSize.Height <= 0) return 0;
-            return Math.Min(boxSize.Width / (double)imgSize.Width, boxSize.Height / (double)imgSize.Height);
+            double scale = Math.Min(boxSize.Width / (double)_decodeW, boxSize.Height / (double)_decodeH);
+            int drawW = (int)(_decodeW * scale);
+            int drawH = (int)(_decodeH * scale);
+            int offX = (boxSize.Width - drawW) / 2;
+            int offY = (boxSize.Height - drawH) / 2;
+            return new Rectangle(offX + (int)(px * scale), offY + (int)(py * scale),
+                (int)(pw * scale), (int)(ph * scale));
         }
 
         private enum CropDragMode { None, Move, ResizeTL, ResizeTR, ResizeBL, ResizeBR, DrawNew }
@@ -1843,7 +1852,7 @@ namespace VideoConverter
 
         private void PicCropPreview_MouseDown(object sender, MouseEventArgs e)
         {
-            if (picCropPreview.Image == null) return;
+            if (picCropPreview.Image == null || _decodeW <= 0) return;
             _cropRect = GetCropRectInPictureBox();
             _cropDragStart = e.Location;
 
@@ -1867,24 +1876,15 @@ namespace VideoConverter
         private void PicCropPreview_MouseMove(object sender, MouseEventArgs e)
         {
             if (_cropDragMode == CropDragMode.None) return;
-            if (picCropPreview.Image == null) return;
+            if (picCropPreview.Image == null || _decodeW <= 0 || _decodeH <= 0) return;
 
-            double scale = GetDisplayScale();
-            if (scale <= 0) return;
-            var imgSize = picCropPreview.Image.Size;
-            var boxSize = picCropPreview.ClientSize;
-            int drawW = (int)(imgSize.Width * scale);
-            int drawH = (int)(imgSize.Height * scale);
-            int offX = (boxSize.Width - drawW) / 2;
-            int offY = (boxSize.Height - drawH) / 2;
-
-            int sx = Math.Max(0, Math.Min(SourceWidth, (int)((e.X - offX) / scale)));
-            int sy = Math.Max(0, Math.Min(SourceHeight, (int)((e.Y - offY) / scale)));
+            int sx = Math.Max(0, Math.Min(SafeSrcW(), BoxToSourceX(e.X)));
+            int sy = Math.Max(0, Math.Min(SafeSrcH(), BoxToSourceY(e.Y)));
 
             if (_cropDragMode == CropDragMode.DrawNew)
             {
-                int sx0 = Math.Max(0, Math.Min(SourceWidth, (int)((_cropDragStart.X - offX) / scale)));
-                int sy0 = Math.Max(0, Math.Min(SourceHeight, (int)((_cropDragStart.Y - offY) / scale)));
+                int sx0 = Math.Max(0, Math.Min(SafeSrcW(), BoxToSourceX(_cropDragStart.X)));
+                int sy0 = Math.Max(0, Math.Min(SafeSrcH(), BoxToSourceY(_cropDragStart.Y)));
                 _crop.X = Math.Min(sx0, sx);
                 _crop.Y = Math.Min(sy0, sy);
                 _crop.Width = Math.Abs(sx - sx0);
@@ -1892,11 +1892,11 @@ namespace VideoConverter
             }
             else if (_cropDragMode == CropDragMode.Move)
             {
-                int dx = e.X - _cropDragStart.X;
-                int dy = e.Y - _cropDragStart.Y;
+                int dxSrc = BoxToSourceX(e.X) - BoxToSourceX(_cropDragStart.X);
+                int dySrc = BoxToSourceY(e.Y) - BoxToSourceY(_cropDragStart.Y);
+                _crop.X = Math.Max(0, Math.Min(SafeSrcW() - _crop.Width, _crop.X + dxSrc));
+                _crop.Y = Math.Max(0, Math.Min(SafeSrcH() - _crop.Height, _crop.Y + dySrc));
                 _cropDragStart = e.Location;
-                _crop.X = Math.Max(0, Math.Min(SourceWidth - _crop.Width, _crop.X + (int)(dx / scale)));
-                _crop.Y = Math.Max(0, Math.Min(SourceHeight - _crop.Height, _crop.Y + (int)(dy / scale)));
             }
             else
             {
@@ -1911,7 +1911,7 @@ namespace VideoConverter
                         _crop.X = nl; _crop.Y = nt;
                         break;
                     case CropDragMode.ResizeTR:
-                        int nr = Math.Max(_crop.X + minSize, Math.Min(SourceWidth, sx));
+                        int nr = Math.Max(_crop.X + minSize, Math.Min(SafeSrcW(), sx));
                         int nt2 = Math.Max(0, Math.Min(_crop.Y + _crop.Height - minSize, sy));
                         _crop.Width = nr - _crop.X;
                         _crop.Height = _crop.Y + _crop.Height - nt2;
@@ -1919,14 +1919,14 @@ namespace VideoConverter
                         break;
                     case CropDragMode.ResizeBL:
                         int nl2 = Math.Max(0, Math.Min(_crop.X + _crop.Width - minSize, sx));
-                        int nb = Math.Max(_crop.Y + minSize, Math.Min(SourceHeight, sy));
+                        int nb = Math.Max(_crop.Y + minSize, Math.Min(SafeSrcH(), sy));
                         _crop.Width = _crop.X + _crop.Width - nl2;
                         _crop.Height = nb - _crop.Y;
                         _crop.X = nl2;
                         break;
                     case CropDragMode.ResizeBR:
-                        _crop.Width = Math.Max(minSize, Math.Min(SourceWidth - _crop.X, sx - _crop.X));
-                        _crop.Height = Math.Max(minSize, Math.Min(SourceHeight - _crop.Y, sy - _crop.Y));
+                        _crop.Width = Math.Max(minSize, Math.Min(SafeSrcW() - _crop.X, sx - _crop.X));
+                        _crop.Height = Math.Max(minSize, Math.Min(SafeSrcH() - _crop.Y, sy - _crop.Y));
                         break;
                 }
             }
@@ -1938,24 +1938,7 @@ namespace VideoConverter
         {
             _cropDragMode = CropDragMode.None;
             picCropPreview.Invalidate();
-            UpdateCropOutputPreview();
-        }
-
-        private async void UpdateCropOutputPreview()
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(InputPath)) return;
-                var img = await FFmpegHelper.GetFrameAtTimeAsync(InputPath, _currentTimeMs,
-                    picCropOutput.Width * 2, picCropOutput.Height * 2);
-                if (img == null) return;
-                using (img)
-                {
-                    var cropped = CropAndRotateBitmap((Bitmap)img, _crop, _rotation);
-                    SwapImage(picCropOutput, cropped);
-                }
-            }
-            catch { }
+            RequestRefresh();
         }
 
         private Bitmap CropAndRotateBitmap(Bitmap src, CropRegion crop, int rotation)
@@ -1981,21 +1964,10 @@ namespace VideoConverter
 
         #endregion
 
-        private async void TabControl_SelectedIndexChanged(object sender, EventArgs e)
+        private void TabControl_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (tabControl.SelectedTab == tabCrop)
-            {
-                var _ = RenderCurrentFrameAsync();
-                UpdateCropOutputPreview();
-            }
-            else if (tabControl.SelectedTab == tabEffects)
-            {
-                var _ = RenderCurrentFrameAsync();
-            }
-            else if (tabControl.SelectedTab == tabTrim)
-            {
-                var _ = RenderCurrentFrameAsync();
-            }
+            // 切换页签时按当前播放头刷新一帧（播放中由实时流自动更新所属页签）
+            if (_engine != null) _engine.RefreshCurrentFrame();
         }
 
         #region OK / Apply
